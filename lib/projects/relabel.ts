@@ -10,20 +10,20 @@ type RelabelOptions = {
 const MAX_PARAGRAPH = 160;
 
 export async function relabelTextWithLLM(options: RelabelOptions): Promise<EntryRecord[]> {
-  const { fullText, styleHint, chunkTarget = 180 } = options;
+  const { fullText, styleHint, chunkTarget = 250 } = options;
   const request = buildPrompt(fullText, styleHint, chunkTarget);
   const result = await runChatCompletion(request);
   if (!result.ok) {
-    return createFallbackEntries(fullText);
+    return createFallbackEntries(fullText, chunkTarget);
   }
   const parsed = parseEntries(result.output);
   if (parsed.length === 0) {
-    return createFallbackEntries(fullText);
+    return createFallbackEntries(fullText, chunkTarget);
   }
   return parsed.slice(0, 400);
 }
 
-function buildPrompt(text: string, styleHint = "", chunkTarget = 180) {
+function buildPrompt(text: string, styleHint = "", chunkTarget = 250) {
   const system = `あなたは編集者アシスタントです。本文を漫画のカット単位に分割し、各カットに詳細なメタ情報を付与するよう求められています。`;
   const user = [
     "以下の要件に従って本文をカット分割してください。",
@@ -34,7 +34,7 @@ function buildPrompt(text: string, styleHint = "", chunkTarget = 180) {
     "- 出力はJSON配列のみ",
     styleHint ? `- 作風ヒント: ${styleHint}` : "",
     "本文:",
-    text
+    text.slice(0, 20000)
   ]
     .filter(Boolean)
     .join("\n");
@@ -101,12 +101,13 @@ function normalizeSpan(span: unknown) {
   return { start, end };
 }
 
-function createFallbackEntries(text: string): EntryRecord[] {
-  const paragraphs = text
-    .split(/\r?\n\s*\r?\n/)
-    .map((segment) => segment.trim())
+function createFallbackEntries(text: string, chunkTarget: number): EntryRecord[] {
+  const sentences = text
+    .replace(/\r\n/g, "\n")
+    .split(/(?<=[。！？!?])\s*/)
+    .map((sentence) => sentence.trim())
     .filter(Boolean);
-  if (!paragraphs.length) {
+  if (!sentences.length) {
     return [
       {
         id: 1,
@@ -124,7 +125,21 @@ function createFallbackEntries(text: string): EntryRecord[] {
       }
     ];
   }
-  return paragraphs.slice(0, 200).map((segment, index) => ({
+
+  const chunks: string[] = [];
+  let buffer = "";
+  for (const sentence of sentences) {
+    if ((buffer + sentence).length > chunkTarget && buffer.length > 0) {
+      chunks.push(buffer.trim());
+      buffer = "";
+    }
+    buffer += (buffer ? " " : "") + sentence;
+  }
+  if (buffer.trim()) {
+    chunks.push(buffer.trim());
+  }
+
+  return chunks.slice(0, 200).map((segment, index) => ({
     id: index + 1,
     text: segment,
     type: "narration",

@@ -1,11 +1,12 @@
 import { generateOverallSummaryFromText, generateEntrySummary } from "@/lib/summary/service";
 import { extractCharactersFromText } from "@/lib/characters/service";
-import { getOpenAIClient } from "@/lib/server/openai";
+import { relabelTextWithLLM } from "@/lib/projects/relabel";
 
 type PipelineInput = {
   title: string;
   fullText: string;
   styleHint: string;
+  chunkTarget?: number;
 };
 
 type PipelineOutput = {
@@ -17,33 +18,24 @@ type PipelineOutput = {
 const MAX_ENTRIES = 200;
 
 export async function runUploadPipeline(input: PipelineInput): Promise<PipelineOutput> {
-  const { title, fullText, styleHint } = input;
+  const { title, fullText, styleHint, chunkTarget = 250 } = input;
   const cleaned = fullText.trim();
   if (!cleaned) {
     throw new Error("本文が空のためプロジェクトを生成できません。");
   }
 
-  const paragraphs = splitIntoParagraphs(cleaned).slice(0, MAX_ENTRIES);
-  const client = getOpenAIClient();
-
-  const llmEntryLimit = client ? 30 : 0;
+  const relabeled = await relabelTextWithLLM({
+    fullText: cleaned,
+    styleHint,
+    chunkTarget
+  });
+  const limitedEntries = relabeled.slice(0, MAX_ENTRIES);
   const entries = await Promise.all(
-    paragraphs.map(async (text, index) => ({
-      id: index + 1,
-      text,
-      type: "narration",
-      speakers: [],
-      time: "unknown",
-      location: "",
-      tone: "neutral",
-      emotion: "neutral",
-      action: "",
-      entities: [],
-      source_span: { start: -1, end: -1 },
-      summary:
-        index < llmEntryLimit
-          ? await generateEntrySummary(text)
-          : text.slice(0, 160) + (text.length > 160 ? "…" : "")
+    limitedEntries.map(async (entry) => ({
+      ...entry,
+      summary: entry.summary?.trim()
+        ? entry.summary
+        : await generateEntrySummary(entry.text)
     }))
   );
 
@@ -55,13 +47,6 @@ export async function runUploadPipeline(input: PipelineInput): Promise<PipelineO
     entries,
     characters
   };
-}
-
-function splitIntoParagraphs(text: string) {
-  return text
-    .split(/\r?\n\s*\r?\n/)
-    .map((segment) => segment.replace(/\s+/g, " ").trim())
-    .filter(Boolean);
 }
 
 async function buildCharacters(fullText: string, styleHint: string) {

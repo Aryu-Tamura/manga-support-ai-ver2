@@ -199,3 +199,42 @@ export async function registerNewProject(input: {
 
   await writeIndexFile(filtered);
 }
+
+export async function overwriteProjectData(input: {
+  key: string;
+  summary: string;
+  entries: unknown[];
+  fullText: string;
+  characters: unknown[];
+  title?: string;
+}): Promise<void> {
+  const { key, summary, entries, fullText, characters, title } = input;
+  if (SAMPLE_PROJECT_KEYS.has(key)) {
+    throw new Error("サンプルプロジェクトは編集できません。");
+  }
+
+  const definitions = await listProjectDefinitions();
+  const target = definitions.find((item) => item.key === key);
+  if (!target) {
+    throw new Error("プロジェクト定義が見つかりません。");
+  }
+
+  const payload = {
+    summary,
+    entries,
+    full_text: fullText
+  };
+
+  await fs.mkdir(path.dirname(target.panelFile), { recursive: true });
+  await fs.writeFile(target.panelFile, JSON.stringify(payload, null, 2), "utf-8");
+  await fs.writeFile(target.characterFile, JSON.stringify(characters, null, 2), "utf-8");
+
+  if (title) {
+    const indexEntries = await readIndexFile();
+    const found = indexEntries.find((entry) => entry.key === key);
+    if (found) {
+      found.title = title;
+      await writeIndexFile(indexEntries);
+    }
+  }
+}

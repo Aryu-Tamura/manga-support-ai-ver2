@@ -529,11 +529,11 @@ video {
 .mt-2 {
   margin-top: 0.5rem;
 }
-.mt-auto {
-  margin-top: auto;
-}
 .mt-4 {
   margin-top: 1rem;
+}
+.mt-auto {
+  margin-top: auto;
 }
 .block {
   display: block;
@@ -556,6 +556,9 @@ video {
 .h-full {
   height: 100%;
 }
+.min-h-\[180px\] {
+  min-height: 180px;
+}
 .min-h-\[200px\] {
   min-height: 200px;
 }
@@ -567,9 +570,6 @@ video {
 }
 .min-h-screen {
   min-height: 100vh;
-}
-.min-h-\[180px\] {
-  min-height: 180px;
 }
 .w-4 {
   width: 1rem;
@@ -593,12 +593,6 @@ video {
   -webkit-user-select: none;
      -moz-user-select: none;
           user-select: none;
-}
-.list-inside {
-  list-style-position: inside;
-}
-.list-disc {
-  list-style-type: disc;
 }
 .grid-cols-1 {
   grid-template-columns: repeat(1, minmax(0, 1fr));
@@ -674,11 +668,6 @@ video {
   margin-top: calc(2rem * calc(1 - var(--tw-space-y-reverse)));
   margin-bottom: calc(2rem * var(--tw-space-y-reverse));
 }
-.truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
 .whitespace-pre-wrap {
   white-space: pre-wrap;
 }
@@ -709,26 +698,26 @@ video {
 .border-border\/60 {
   border-color: hsl(var(--border) / 0.6);
 }
-.border-muted-foreground\/30 {
-  border-color: hsl(var(--muted-foreground) / 0.3);
-}
-.border-muted-foreground\/40 {
-  border-color: hsl(var(--muted-foreground) / 0.4);
-}
-.border-primary {
-  border-color: hsl(var(--primary));
-}
-.border-primary\/60 {
-  border-color: hsl(var(--primary) / 0.6);
-}
 .border-destructive {
   border-color: hsl(var(--destructive));
 }
 .border-emerald-500\/40 {
   border-color: rgb(16 185 129 / 0.4);
 }
+.border-muted-foreground\/30 {
+  border-color: hsl(var(--muted-foreground) / 0.3);
+}
+.border-muted-foreground\/40 {
+  border-color: hsl(var(--muted-foreground) / 0.4);
+}
 .border-muted-foreground\/60 {
   border-color: hsl(var(--muted-foreground) / 0.6);
+}
+.border-primary {
+  border-color: hsl(var(--primary));
+}
+.border-primary\/60 {
+  border-color: hsl(var(--primary) / 0.6);
 }
 .bg-background {
   background-color: hsl(var(--background));
@@ -741,6 +730,13 @@ video {
 }
 .bg-card\/60 {
   background-color: hsl(var(--card) / 0.6);
+}
+.bg-destructive\/10 {
+  background-color: hsl(var(--destructive) / 0.1);
+}
+.bg-emerald-100 {
+  --tw-bg-opacity: 1;
+  background-color: rgb(209 250 229 / var(--tw-bg-opacity, 1));
 }
 .bg-muted {
   background-color: hsl(var(--muted));
@@ -763,24 +759,17 @@ video {
 .bg-primary\/5 {
   background-color: hsl(var(--primary) / 0.05);
 }
-.bg-destructive\/10 {
-  background-color: hsl(var(--destructive) / 0.1);
-}
-.bg-emerald-100 {
-  --tw-bg-opacity: 1;
-  background-color: rgb(209 250 229 / var(--tw-bg-opacity, 1));
-}
 .p-3 {
   padding: 0.75rem;
 }
 .p-4 {
   padding: 1rem;
 }
-.p-6 {
-  padding: 1.5rem;
-}
 .p-5 {
   padding: 1.25rem;
+}
+.p-6 {
+  padding: 1.5rem;
 }
 .px-2 {
   padding-left: 0.5rem;
@@ -802,6 +791,10 @@ video {
   padding-left: 2rem;
   padding-right: 2rem;
 }
+.py-0\.5 {
+  padding-top: 0.125rem;
+  padding-bottom: 0.125rem;
+}
 .py-1 {
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
@@ -814,21 +807,13 @@ video {
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
 }
-.py-8 {
-  padding-top: 2rem;
-  padding-bottom: 2rem;
-}
 .py-3 {
   padding-top: 0.75rem;
   padding-bottom: 0.75rem;
 }
-.py-6 {
-  padding-top: 1.5rem;
-  padding-bottom: 1.5rem;
-}
-.py-0\.5 {
-  padding-top: 0.125rem;
-  padding-bottom: 0.125rem;
+.py-8 {
+  padding-top: 2rem;
+  padding-bottom: 2rem;
 }
 .pt-4 {
   padding-top: 1rem;
@@ -846,6 +831,13 @@ video {
   font-size: 1.5rem;
   line-height: 2rem;
 }
+.text-\[10px\] {
+  font-size: 10px;
+}
+.text-base {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
 .text-lg {
   font-size: 1.125rem;
   line-height: 1.75rem;
@@ -861,13 +853,6 @@ video {
 .text-xs {
   font-size: 0.75rem;
   line-height: 1rem;
-}
-.text-base {
-  font-size: 1rem;
-  line-height: 1.5rem;
-}
-.text-\[10px\] {
-  font-size: 10px;
 }
 .font-bold {
   font-weight: 700;
@@ -899,6 +884,14 @@ video {
 .text-destructive {
   color: hsl(var(--destructive));
 }
+.text-emerald-600 {
+  --tw-text-opacity: 1;
+  color: rgb(5 150 105 / var(--tw-text-opacity, 1));
+}
+.text-emerald-700 {
+  --tw-text-opacity: 1;
+  color: rgb(4 120 87 / var(--tw-text-opacity, 1));
+}
 .text-foreground {
   color: hsl(var(--foreground));
 }
@@ -910,14 +903,6 @@ video {
 }
 .text-primary-foreground {
   color: hsl(var(--primary-foreground));
-}
-.text-emerald-600 {
-  --tw-text-opacity: 1;
-  color: rgb(5 150 105 / var(--tw-text-opacity, 1));
-}
-.text-emerald-700 {
-  --tw-text-opacity: 1;
-  color: rgb(4 120 87 / var(--tw-text-opacity, 1));
 }
 .antialiased {
   -webkit-font-smoothing: antialiased;
@@ -1032,28 +1017,28 @@ body {
   border-color: hsl(var(--border) / 0.7);
 }
 
+.hover\:border-muted-foreground\/80:hover {
+  border-color: hsl(var(--muted-foreground) / 0.8);
+}
+
 .hover\:border-primary:hover {
   border-color: hsl(var(--primary));
 }
 
-.hover\:border-muted-foreground\/80:hover {
-  border-color: hsl(var(--muted-foreground) / 0.8);
+.hover\:bg-destructive\/10:hover {
+  background-color: hsl(var(--destructive) / 0.1);
 }
 
 .hover\:bg-muted:hover {
   background-color: hsl(var(--muted));
 }
 
-.hover\:bg-primary\/90:hover {
-  background-color: hsl(var(--primary) / 0.9);
-}
-
 .hover\:bg-primary\/5:hover {
   background-color: hsl(var(--primary) / 0.05);
 }
 
-.hover\:bg-destructive\/10:hover {
-  background-color: hsl(var(--destructive) / 0.1);
+.hover\:bg-primary\/90:hover {
+  background-color: hsl(var(--primary) / 0.9);
 }
 
 .hover\:text-foreground:hover {
@@ -1071,12 +1056,12 @@ body {
   box-shadow: var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow, 0 0 #0000);
 }
 
-.focus-visible\:ring-ring:focus-visible {
-  --tw-ring-color: hsl(var(--ring));
-}
-
 .focus-visible\:ring-destructive:focus-visible {
   --tw-ring-color: hsl(var(--destructive));
+}
+
+.focus-visible\:ring-ring:focus-visible {
+  --tw-ring-color: hsl(var(--ring));
 }
 
 .focus-visible\:ring-offset-2:focus-visible {
@@ -1124,12 +1109,12 @@ body {
 
 @media (min-width: 1024px) {
 
-  .lg\:grid-cols-\[minmax\(0\2c 1\.1fr\)_minmax\(0\2c 0\.9fr\)\] {
-    grid-template-columns: minmax(0,1.1fr) minmax(0,0.9fr);
-  }
-
   .lg\:grid-cols-\[minmax\(0\2c 0\.6fr\)_minmax\(0\2c 0\.4fr\)\] {
     grid-template-columns: minmax(0,0.6fr) minmax(0,0.4fr);
+  }
+
+  .lg\:grid-cols-\[minmax\(0\2c 1\.1fr\)_minmax\(0\2c 0\.9fr\)\] {
+    grid-template-columns: minmax(0,1.1fr) minmax(0,0.9fr);
   }
 }
 

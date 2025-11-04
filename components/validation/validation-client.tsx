@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   generateSummaryVariationsAction,
   generateReconstructedSummaryAction
@@ -46,10 +46,17 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
   const initialRange = useMemo(() => defaultRange(entries), [entries]);
   const [rangeStart, setRangeStart] = useState(initialRange.start);
   const [rangeEnd, setRangeEnd] = useState(initialRange.end);
-  const [blocks, setBlocks] = useState<ValidationBlock[]>(
-    buildInitialBlocks(entries, initialRange.start, initialRange.end)
+  const initialBlocks = useMemo(
+    () => buildInitialBlocks(entries, initialRange.start, initialRange.end),
+    [entries, initialRange.start, initialRange.end]
   );
-  const [selectedId, setSelectedId] = useState<number | null>(blocks[0]?.entryId ?? null);
+  const HISTORY_LIMIT = 50;
+  const [history, setHistory] = useState(() => ({
+    past: [] as ValidationBlock[][],
+    present: initialBlocks,
+    future: [] as ValidationBlock[][]
+  }));
+  const [selectedId, setSelectedId] = useState<number | null>(initialBlocks[0]?.entryId ?? null);
   const [variationsState, setVariationsState] = useState<VariationsState>(null);
   const [reconstructionState, setReconstructionState] = useState<ReconstructionState>(null);
   const [variationPrompt, setVariationPrompt] = useState("読みやすくする");
@@ -60,6 +67,14 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
   const [isApplyingRange, startApplyRange] = useTransition();
   const [isGeneratingVariations, startGenerateVariations] = useTransition();
   const [isReconstructing, startReconstruct] = useTransition();
+
+  const blocks = history.present;
+
+  useEffect(() => {
+    if (selectedId === null && blocks.length) {
+      setSelectedId(blocks[0].entryId);
+    }
+  }, [blocks, selectedId]);
 
   const selectedBlock = useMemo(
     () => blocks.find((block) => block.entryId === selectedId) ?? null,
@@ -79,6 +94,42 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
     ];
   }, [selectedBlock]);
 
+  const pushHistory = (nextBlocks: ValidationBlock[]) => {
+    setHistory((prev) => ({
+      past: [...prev.past, prev.present].slice(-HISTORY_LIMIT),
+      present: nextBlocks,
+      future: []
+    }));
+  };
+
+  const handleUndo = () => {
+    setHistory((prev) => {
+      if (!prev.past.length) return prev;
+      const previous = prev.past[prev.past.length - 1];
+      const newPast = prev.past.slice(0, -1);
+      return {
+        past: newPast,
+        present: previous,
+        future: [prev.present, ...prev.future].slice(0, HISTORY_LIMIT)
+      };
+    });
+  };
+
+  const handleRedo = () => {
+    setHistory((prev) => {
+      if (!prev.future.length) return prev;
+      const [next, ...rest] = prev.future;
+      return {
+        past: [...prev.past, prev.present].slice(-HISTORY_LIMIT),
+        present: next,
+        future: rest
+      };
+    });
+  };
+
+  const canUndo = history.past.length > 0;
+  const canRedo = history.future.length > 0;
+
   const handleApplyRange = () => {
     setRangeMessage(null);
     startApplyRange(() => {
@@ -89,7 +140,7 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
         setRangeMessage("指定範囲に要約ブロックがありません。");
         return;
       }
-      setBlocks(nextBlocks);
+      pushHistory(nextBlocks);
       setSelectedId(nextBlocks[0].entryId);
       setVariationsState(null);
       setReconstructionState(null);
@@ -98,32 +149,31 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
   };
 
   const handleSummaryChange = (entryId: number, summary: string) => {
-    setBlocks((prev) =>
-      prev.map((block) =>
-        block.entryId === entryId
-          ? {
-              ...block,
-              summary
-            }
-          : block
-      )
+    const nextBlocks = blocks.map((block) =>
+      block.entryId === entryId
+        ? {
+            ...block,
+            summary
+          }
+        : block
     );
+    pushHistory(nextBlocks);
   };
 
   const handleMoveBlock = (entryId: number, direction: "up" | "down") => {
-    setBlocks((prev) => {
-      const index = prev.findIndex((block) => block.entryId === entryId);
-      if (index === -1) return prev;
-      const target = direction === "up" ? index - 1 : index + 1;
-      if (target < 0 || target >= prev.length) return prev;
-      const next = [...prev];
-      const [current] = next.splice(index, 1);
-      next.splice(target, 0, current);
-      return next.map((block, idx) => ({
+    const index = blocks.findIndex((block) => block.entryId === entryId);
+    if (index === -1) return;
+    const target = direction === "up" ? index - 1 : index + 1;
+    if (target < 0 || target >= blocks.length) return;
+    const next = [...blocks];
+    const [current] = next.splice(index, 1);
+    next.splice(target, 0, current);
+    pushHistory(
+      next.map((block, idx) => ({
         ...block,
         order: idx + 1
-      }));
-    });
+      }))
+    );
   };
 
   const handleGenerateVariations = () => {
@@ -206,6 +256,30 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
             チャンク範囲を指定し、各要約ブロックの順序と表現を調整します。
           </p>
         </header>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleUndo}
+            disabled={!canUndo}
+            className={cn(
+              "inline-flex items-center justify-center rounded-md border border-border px-3 py-1 text-sm",
+              canUndo ? "hover:bg-muted" : "cursor-not-allowed opacity-60"
+            )}
+          >
+            Undo
+          </button>
+          <button
+            type="button"
+            onClick={handleRedo}
+            disabled={!canRedo}
+            className={cn(
+              "inline-flex items-center justify-center rounded-md border border-border px-3 py-1 text-sm",
+              canRedo ? "hover:bg-muted" : "cursor-not-allowed opacity-60"
+            )}
+          >
+            Redo
+          </button>
+        </div>
         <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
           <div className="grid grid-cols-2 gap-4">
             <NumberField

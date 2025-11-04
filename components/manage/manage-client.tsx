@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import {
   deleteProjectAction,
   createProjectFromUploadAction,
-  updateProjectMetadataAction
+  updateProjectMetadataAction,
+  relabelProjectAction
 } from "@/app/(dashboard)/projects/manage/actions";
 import { cn } from "@/lib/utils";
 
@@ -61,9 +62,14 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploadStyleHint, setUploadStyleHint] = useState("");
+  const [uploadChunkSize, setUploadChunkSize] = useState(250);
   const [isUploading, startUploadTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
+  const [relabelHints, setRelabelHints] = useState<Record<string, string>>({});
+  const [relabelChunkSizes, setRelabelChunkSizes] = useState<Record<string, number>>({});
+  const [relabelKey, setRelabelKey] = useState<string | null>(null);
+  const [isRelabeling, startRelabelTransition] = useTransition();
 
   const formMap = useMemo(() => new Map(forms.map((form) => [form.key, form])), [forms]);
 
@@ -146,6 +152,36 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
     });
   };
 
+  const handleRelabel = (project: ManageProject) => {
+    if (project.isSample) {
+      return;
+    }
+    setRelabelKey(project.key);
+    startRelabelTransition(async () => {
+      const response = await relabelProjectAction({
+        key: project.key,
+        styleHint: relabelHints[project.key] ?? "",
+        chunkTarget: relabelChunkSizes[project.key] ?? 250
+      });
+      setRelabelKey(null);
+      setMessages((prev) => ({
+        ...prev,
+        [project.key]: {
+          type: response.ok ? "success" : "error",
+          text: response.message
+        }
+      }));
+      setGlobalMessage(
+        response.ok
+          ? { type: "success", text: "再ラベルを実行し、最新のチャンクを保存しました。" }
+          : { type: "error", text: response.message }
+      );
+      if (response.ok) {
+        router.refresh();
+      }
+    });
+  };
+
   const handleUploadSubmit = () => {
     if (!uploadTitle.trim() || !uploadFile) {
       setUploadMessage({
@@ -161,6 +197,7 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
       formData.append("title", uploadTitle.trim());
       formData.append("styleHint", uploadStyleHint);
       formData.append("file", uploadFile, uploadFile.name);
+      formData.append("chunkTarget", String(uploadChunkSize));
       setUploadSteps((prev) => [...prev, "2. 本文解析とチャンク生成を実行中…"]);
       const response = await createProjectFromUploadAction(formData);
       setUploadSteps((prev) => [...prev, "3. プロジェクトを登録中…"]);
@@ -173,6 +210,7 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
         setUploadStyleHint("");
         setUploadFile(null);
         setUploadFileName(null);
+        setUploadChunkSize(250);
         if (fileInputRef.current) {
           fileInputRef.current.value = "";
         }
@@ -189,16 +227,14 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
     <div className="space-y-8">
       <section className="rounded-lg border border-border bg-card p-6 shadow-sm">
         <header className="space-y-2">
-          <h3 className="text-lg font-semibold tracking-tight">新規プロジェクト（準備中）</h3>
+          <h3 className="text-lg font-semibold tracking-tight">新規プロジェクト</h3>
           <p className="text-sm text-muted-foreground">
-            原作ファイルのアップロードから LLM 解析までのフローは今後のスプリントで移植します。
-            現状は Streamlit 側で作成済みのプロジェクトを管理できます。
+            原作ファイルをアップロードすると、LLM がチャンク分割・要約・キャラクター抽出まで自動で実行し、新しいプロジェクトとして登録します。
           </p>
         </header>
         <div className="mt-4 space-y-4">
           <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-            Streamlit 版で提供している「原作アップロード→LLM解析」フローを Next.js に移植する準備中です。
-            本番運用に向けた UI を先行で提供していますが、実際のファイル処理は次のスプリントで接続します。
+            解析はサーバー側で順次実行されます。OpenAI API キーが設定されていない場合はサンプル要約で登録されます。
           </div>
 
           <div className="space-y-3">
@@ -248,6 +284,20 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
                 rows={3}
                 placeholder="LLM に伝えたい補足（例：テンポ感、ターゲット層など）"
                 className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+              />
+            </label>
+
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                チャンク目標文字数（80〜600）
+              </span>
+              <input
+                type="number"
+                min={80}
+                max={600}
+                value={uploadChunkSize}
+                onChange={(event) => setUploadChunkSize(Number(event.target.value) || 250)}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
               />
             </label>
 
@@ -359,37 +409,83 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
                       handleFieldChange(project.key, "summary", event.target.value)
                     }
                     rows={4}
-                    disabled={disabled}
-                    className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
-                  />
-                </label>
+                disabled={disabled}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+              />
+            </label>
 
-                <div className="flex flex-wrap items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => handleUpdate(project)}
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                再ラベル用ヒント（任意）
+              </span>
+              <textarea
+                value={relabelHints[project.key] ?? ""}
+                onChange={(event) =>
+                  setRelabelHints((prev) => ({
+                    ...prev,
+                    [project.key]: event.target.value
+                  }))
+                }
+                rows={3}
+                disabled={disabled}
+                placeholder="キャラクターの補足・チャンク分割時に意識したい点など"
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+              />
+            </label>
+
+            <label className="flex flex-col gap-2">
+              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                再ラベル目標文字数（80〜600）
+              </span>
+              <input
+                type="number"
+                min={80}
+                max={600}
+                value={relabelChunkSizes[project.key] ?? 250}
+                onChange={(event) =>
+                  setRelabelChunkSizes((prev) => ({
+                    ...prev,
+                    [project.key]: Number(event.target.value) || 250
+                  }))
+                }
+                disabled={disabled}
+                className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+              />
+            </label>
+
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => handleUpdate(project)}
                     disabled={disabled || pendingKey === project.key || isUpdating}
                     className={cn(
                       "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
                       "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                       (disabled || pendingKey === project.key || isUpdating) &&
                         "cursor-not-allowed opacity-60"
-                    )}
-                  >
-                    {pendingKey === project.key && isUpdating ? "保存中…" : "保存する"}
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    className="inline-flex items-center justify-center rounded-md border border-dashed border-muted-foreground/40 px-4 py-2 text-sm font-semibold text-muted-foreground"
-                    title="LLM再ラベル付けは今後実装予定です"
-                  >
-                    LLMで再ラベル（準備中）
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleDelete(project)}
-                    disabled={disabled || pendingKey === project.key || isDeleting}
+                )}
+              >
+                {pendingKey === project.key && isUpdating ? "保存中…" : "保存する"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleRelabel(project)}
+                disabled={
+                  disabled || relabelKey === project.key || isRelabeling || project.chunkCount === 0
+                }
+                className={cn(
+                  "inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition",
+                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  (disabled || relabelKey === project.key || isRelabeling || project.chunkCount === 0) &&
+                    "cursor-not-allowed opacity-60"
+                )}
+              >
+                {relabelKey === project.key && isRelabeling ? "再ラベル中…" : "LLMで再ラベル"}
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDelete(project)}
+                disabled={disabled || pendingKey === project.key || isDeleting}
                     className={cn(
                       "inline-flex items-center justify-center rounded-md border border-destructive px-4 py-2 text-sm font-semibold text-destructive transition",
                       "hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2",
