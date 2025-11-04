@@ -6,7 +6,6 @@ import {
   BookOpen,
   ClipboardCheck,
   Image as ImageIcon,
-  ListTree,
   Settings2,
   Users
 } from "lucide-react";
@@ -34,14 +33,8 @@ const NAV_ITEMS: NavItem[] = [
     baseHref: (key) => (key ? `/projects/${key}/characters` : "/projects")
   },
   {
-    id: "plot",
-    label: "プロット支援",
-    icon: ListTree,
-    baseHref: (key) => (key ? `/projects/${key}/plot` : "/projects")
-  },
-  {
     id: "validation",
-    label: "検証",
+    label: "プロット支援",
     icon: ClipboardCheck,
     baseHref: (key) => (key ? `/projects/${key}/validation` : "/projects")
   },
