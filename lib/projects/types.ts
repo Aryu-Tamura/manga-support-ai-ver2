@@ -7,6 +7,13 @@ export const SourceSpanSchema = z.object({
 
 export type SourceSpan = z.infer<typeof SourceSpanSchema>;
 
+export const SummarySentenceSchema = z.object({
+  text: z.string(),
+  citations: z.array(z.number().int())
+});
+
+export type SummarySentence = z.infer<typeof SummarySentenceSchema>;
+
 export const EntryRecordSchema = z.object({
   id: z.number().int(),
   text: z.string(),
@@ -53,6 +60,8 @@ export const ProjectDataSchema = z.object({
   key: z.string(),
   title: z.string(),
   summary: z.string().optional().default(""),
+  summarySentences: z.array(SummarySentenceSchema).optional().default([]),
+  summaryUpdatedAt: z.string().optional().default(""),
   entries: z.array(EntryRecordSchema),
   characters: z.array(CharacterRecordSchema),
   fullText: z.string().optional().default(""),

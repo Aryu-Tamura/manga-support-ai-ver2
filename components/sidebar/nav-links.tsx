@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   BookOpen,
   ClipboardCheck,
+  Image as ImageIcon,
   ListTree,
   Settings2,
   Users
@@ -43,6 +44,12 @@ const NAV_ITEMS: NavItem[] = [
     label: "検証",
     icon: ClipboardCheck,
     baseHref: (key) => (key ? `/projects/${key}/validation` : "/projects")
+  },
+  {
+    id: "picture-book",
+    label: "絵本化",
+    icon: ImageIcon,
+    baseHref: (key) => (key ? `/projects/${key}/picture-book` : "/projects")
   }
 ];
 

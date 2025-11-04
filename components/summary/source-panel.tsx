@@ -1,4 +1,6 @@
-import { useMemo } from "react";
+"use client";
+
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 type SourcePanelEntry = {
@@ -10,10 +12,41 @@ type SourcePanelEntry = {
 type SourcePanelProps = {
   entries: SourcePanelEntry[];
   highlightedIds?: number[];
+  activeId?: number | null;
 };
 
-export function SourcePanel({ entries, highlightedIds = [] }: SourcePanelProps) {
+export function SourcePanel({ entries, highlightedIds = [], activeId = null }: SourcePanelProps) {
   const highlightedSet = useMemo(() => new Set(highlightedIds), [highlightedIds]);
+  const entryRefs = useRef<Map<number, HTMLLIElement>>(new Map());
+  const containerRef = useRef<HTMLUListElement>(null);
+
+  const setEntryRef = useCallback(
+    (id: number) => (node: HTMLLIElement | null) => {
+      if (!entryRefs.current) {
+        entryRefs.current = new Map();
+      }
+      if (node) {
+        entryRefs.current.set(id, node);
+      } else {
+        entryRefs.current.delete(id);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (typeof activeId !== "number") {
+      return;
+    }
+    const target = entryRefs.current.get(activeId);
+    const container = containerRef.current;
+    if (target && container) {
+      const containerTop = container.getBoundingClientRect().top;
+      const targetTop = target.getBoundingClientRect().top;
+      const offset = targetTop - containerTop + container.scrollTop - 12;
+      container.scrollTo({ top: Math.max(0, offset), behavior: "smooth" });
+    }
+  }, [activeId]);
 
   if (entries.length === 0) {
     return (
@@ -31,13 +64,17 @@ export function SourcePanel({ entries, highlightedIds = [] }: SourcePanelProps) 
           要約に紐づく本文です。ハイライト表示されている項目が引用候補です。
         </p>
       </header>
-      <ul className="flex flex-col gap-3">
+      <ul ref={containerRef} className="flex max-h-80 flex-col gap-3 overflow-y-auto pr-1">
         {entries.map((entry) => (
           <li
             key={entry.id}
+            ref={setEntryRef(entry.id)}
+            tabIndex={0}
             className={cn(
-              "rounded-md border border-border/50 bg-background/80 p-3 text-sm transition",
-              highlightedSet.has(entry.id) && "border-primary/60 bg-primary/5 shadow-sm"
+              "rounded-md border border-border/50 bg-background/80 p-3 text-sm transition outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              (highlightedSet.has(entry.id) || entry.id === activeId) &&
+                "border-primary/60 bg-primary/5 shadow-sm",
+              entry.id === activeId && "ring-2 ring-primary/40"
             )}
           >
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

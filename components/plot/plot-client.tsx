@@ -1,10 +1,11 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import {
   generatePlotAction,
   generatePlotDocxAction
 } from "@/app/(dashboard)/projects/[projectKey]/plot/actions";
+import { CitationList } from "@/components/shared/citation-list";
 import { SourcePanel } from "@/components/summary/source-panel";
 import { cn } from "@/lib/utils";
 
@@ -43,6 +44,7 @@ export function PlotClient({
   const [downloadMessage, setDownloadMessage] = useState<string | null>(null);
   const [isGenerating, startGenerate] = useTransition();
   const [isDownloading, startDownload] = useTransition();
+  const [activeCitation, setActiveCitation] = useState<number | null>(null);
 
   const clampedStart = Math.max(1, Math.min(startId, chunkCount || 1));
   const clampedEnd = Math.max(clampedStart, Math.min(endId, chunkCount || 1));
@@ -55,6 +57,7 @@ export function PlotClient({
   const handleGenerate = () => {
     setErrorMessage(null);
     setDownloadMessage(null);
+    setActiveCitation(null);
     startGenerate(async () => {
       const response = await generatePlotAction({
         projectKey,
@@ -100,6 +103,15 @@ export function PlotClient({
       setDownloadMessage("DOCX をダウンロードしました。");
     });
   };
+
+  useEffect(() => {
+    const citations = plotState?.citations ?? [];
+    if (!citations.length) {
+      setActiveCitation(null);
+      return;
+    }
+    setActiveCitation((current) => (current && citations.includes(current) ? current : citations[0]));
+  }, [plotState?.citations]);
 
   return (
     <div className="space-y-6">
@@ -182,11 +194,12 @@ export function PlotClient({
             >
               {isDownloading ? "作成中…" : "DOCXとしてダウンロード"}
             </button>
-            {plotState?.citations.length ? (
-              <span className="text-xs text-muted-foreground">
-                引用チャンク: {plotState.citations.join(", ")}
-              </span>
-            ) : null}
+            <CitationList
+              citations={plotState?.citations ?? []}
+              activeId={activeCitation}
+              onSelect={(id) => setActiveCitation(id)}
+              className="rounded-md bg-muted/40 px-3 py-1"
+            />
           </div>
           {downloadMessage && (
             <p
@@ -201,7 +214,11 @@ export function PlotClient({
         </section>
       </div>
 
-      <SourcePanel entries={selectedEntries} highlightedIds={plotState?.citations ?? []} />
+      <SourcePanel
+        entries={selectedEntries}
+        highlightedIds={plotState?.citations ?? []}
+        activeId={activeCitation}
+      />
     </div>
   );
 }

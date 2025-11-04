@@ -5,6 +5,7 @@ import { OPENAI_MODEL } from "@/lib/config/llm";
 export type SummaryVariationInput = {
   summary: string;
   customPrompt: string;
+  citations?: number[];
 };
 
 export type SummaryVariationResult = {
@@ -14,7 +15,7 @@ export type SummaryVariationResult = {
 
 export type ReconstructedSummaryInput = {
   project: ProjectData;
-  blocks: { id: number; summary: string }[];
+  blocks: { id: number; summary: string; citations?: number[] }[];
   targetLength: number;
 };
 
@@ -37,16 +38,23 @@ export async function generateSummaryVariations(
     return buildSampleVariations(input.summary);
   }
 
+  const citationLine = (input.citations ?? []).length
+    ? `参照チャンク: ${input.citations.join(", ")}`
+    : "";
   const prompt = [
     "対象の要約文:",
     input.summary || "（要約が空です）",
+    citationLine,
     "----",
     "リライトの目的:",
     input.customPrompt || "読みやすさを向上させる",
     "----",
+    "引用チャンク番号は変えず、必ず出典に基づいて記述してください。",
     "JSON配列で出力してください。各要素は {\"variant\": string, \"note\": string} の形式にしてください。",
     "variant は書き換え後の要約文、note は意図を短く説明します。"
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 
   try {
     const completion = await client.chat.completions.create({
@@ -86,7 +94,10 @@ export async function generateReconstructedSummary(
 
   const { project, blocks, targetLength } = input;
   const list = blocks
-    .map((block, index) => `${index + 1}. [${block.id}] ${block.summary}`)
+    .map((block, index) => {
+      const citationLabel = block.citations?.length ? ` {引用: ${block.citations.join(", ")}}` : "";
+      return `${index + 1}. [${block.id}]${citationLabel} ${block.summary}`;
+    })
     .join("\n");
   const prompt = [
     `作品: ${project.title}`,
@@ -94,7 +105,7 @@ export async function generateReconstructedSummary(
     "利用する要約ブロック:",
     list || "（要約ブロックが空です）",
     "----",
-    "これらを自然な一つの要約文に再構成してください。段落は最大でも2つまで、出典の無い情報は加えないでください。"
+    "これらを自然な一つの要約文に再構成してください。段落は最大でも2つまで、出典の無い情報は加えないでください。引用チャンク番号が変わらないように留意してください。"
   ].join("\n");
 
   try {
@@ -183,7 +194,10 @@ function buildSampleReconstruction(input: ReconstructedSummaryInput): Reconstruc
     };
   }
   const joined = blocks
-    .map((block, index) => `${index + 1}. [${block.id}] ${block.summary}`)
+    .map((block, index) => {
+      const citationLabel = block.citations?.length ? ` {引用: ${block.citations.join(", ")}}` : "";
+      return `${index + 1}. [${block.id}]${citationLabel} ${block.summary}`;
+    })
     .join("\n");
   return {
     summary: ["【サンプル再構成】以下の要約を読みやすく連結してください。", joined].join("\n"),

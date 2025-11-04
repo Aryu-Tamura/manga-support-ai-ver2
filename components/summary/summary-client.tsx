@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useState, useTransition } from "react";
+import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { generateSummaryAction } from "@/app/(dashboard)/projects/[projectKey]/summary/actions";
 import { DEFAULT_SUMMARY_GRAIN } from "@/lib/config/summary";
 import { cn } from "@/lib/utils";
 import { SourcePanel } from "./source-panel";
+import type { SummarySentence } from "@/lib/projects/types";
 
 type SummaryEntry = {
   id: number;
@@ -18,11 +20,12 @@ type SummaryClientProps = {
   chunkCount: number;
   entries: SummaryEntry[];
   grainOptions: number[];
+  sourcePanelContainerId?: string;
 };
 
 type SummaryState =
   | {
-      summary: string;
+      sentences: SummarySentence[];
       citations: number[];
       mode: "llm" | "sample";
     }
@@ -33,7 +36,8 @@ export function SummaryClient({
   projectTitle,
   chunkCount,
   entries,
-  grainOptions
+  grainOptions,
+  sourcePanelContainerId
 }: SummaryClientProps) {
   const [rangeMode, setRangeMode] = useState<"all" | "custom">("all");
   const [startId, setStartId] = useState(1);
@@ -46,6 +50,8 @@ export function SummaryClient({
   const [summaryState, setSummaryState] = useState<SummaryState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [activeCitation, setActiveCitation] = useState<number | null>(null);
+  const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
 
   const effectiveStart = rangeMode === "all" ? 1 : clamp(startId, 1, chunkCount);
   const effectiveEnd =
@@ -54,6 +60,42 @@ export function SummaryClient({
   const selectedEntries = useMemo(() => {
     return entries.filter((entry) => entry.id >= effectiveStart && entry.id <= effectiveEnd);
   }, [entries, effectiveEnd, effectiveStart]);
+
+  const entrySummaryMap = useMemo(() => {
+    if (!summaryState?.sentences?.length) {
+      return new Map<number, string>();
+    }
+    const collected = new Map<number, string[]>();
+    for (const sentence of summaryState.sentences) {
+      const text = sentence.text.trim();
+      if (!text) {
+        continue;
+      }
+      for (const citation of sentence.citations) {
+        const list = collected.get(citation) ?? [];
+        list.push(text);
+        collected.set(citation, list);
+      }
+    }
+    const summaryByEntry = new Map<number, string>();
+    for (const [id, fragments] of collected) {
+      const unique = Array.from(
+        new Set(fragments.map((fragment) => fragment.trim()).filter((fragment) => fragment))
+      );
+      if (!unique.length) {
+        continue;
+      }
+      summaryByEntry.set(id, unique.join(" / "));
+    }
+    return summaryByEntry;
+  }, [summaryState?.sentences]);
+
+  const enrichedEntries = useMemo(() => {
+    return selectedEntries.map((entry) => ({
+      ...entry,
+      summary: entrySummaryMap.get(entry.id) ?? entry.summary
+    }));
+  }, [entrySummaryMap, selectedEntries]);
 
   const handleRangeModeChange = useCallback(
     (mode: "all" | "custom") => {
@@ -68,6 +110,7 @@ export function SummaryClient({
 
   const handleGenerate = useCallback(() => {
     setErrorMessage(null);
+    setActiveCitation(null);
     startTransition(async () => {
       const response = await generateSummaryAction({
         projectKey,
@@ -80,12 +123,48 @@ export function SummaryClient({
         return;
       }
       setSummaryState({
-        summary: response.summary,
+        sentences: response.sentences,
         citations: response.citations,
         mode: response.mode
       });
     });
   }, [effectiveEnd, effectiveStart, grain, projectKey]);
+
+  useEffect(() => {
+    const citations = summaryState?.citations ?? [];
+    if (!citations.length) {
+      setActiveCitation(null);
+      return;
+    }
+    setActiveCitation((current) => (current && citations.includes(current) ? current : citations[0]));
+  }, [summaryState?.citations]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return () => {};
+    }
+
+    const listener = (event: Event) => {
+      const detail = (event as CustomEvent<{ citation: number }>).detail;
+      if (!detail || typeof detail.citation !== "number") {
+        return;
+      }
+      setActiveCitation(detail.citation);
+    };
+    window.addEventListener("summary:citation-select", listener as EventListener);
+    return () => {
+      window.removeEventListener("summary:citation-select", listener as EventListener);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!sourcePanelContainerId || typeof window === "undefined") {
+      setPortalTarget(null);
+      return;
+    }
+    const element = document.getElementById(sourcePanelContainerId);
+    setPortalTarget(element);
+  }, [sourcePanelContainerId]);
 
   return (
     <div className="space-y-6">
@@ -194,23 +273,39 @@ export function SummaryClient({
             </p>
           </header>
           <div className="min-h-[200px] rounded-md border border-border/60 bg-background/80 p-4 text-sm leading-relaxed text-foreground">
-            {summaryState ? (
-              <div className="whitespace-pre-wrap">{summaryState.summary}</div>
+            {summaryState && summaryState.sentences.length ? (
+              <SummaryText
+                sentences={summaryState.sentences}
+                onSelectCitation={setActiveCitation}
+                activeCitation={activeCitation}
+              />
             ) : (
               <p className="text-muted-foreground">
                 要約がここに表示されます。範囲と文字数を指定して生成してください。
               </p>
             )}
           </div>
-          {summaryState?.citations.length ? (
-            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              引用チャンク: {summaryState.citations.join(", ")}
-            </div>
-          ) : null}
         </section>
       </div>
 
-      <SourcePanel entries={selectedEntries} highlightedIds={summaryState?.citations ?? []} />
+      {sourcePanelContainerId
+        ? portalTarget
+          ? createPortal(
+              <SourcePanel
+                entries={enrichedEntries}
+                highlightedIds={summaryState?.citations ?? []}
+                activeId={activeCitation}
+              />,
+              portalTarget
+            )
+          : null
+        : (
+              <SourcePanel
+                entries={enrichedEntries}
+                highlightedIds={summaryState?.citations ?? []}
+                activeId={activeCitation}
+              />
+            )}
     </div>
   );
 }
@@ -270,4 +365,70 @@ function RangeToggle({ label, active, onClick }: RangeToggleProps) {
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
+}
+
+type SummaryTextProps = {
+  sentences: SummarySentence[];
+  activeCitation: number | null;
+  onSelectCitation: (citation: number) => void;
+};
+
+function SummaryText({ sentences, activeCitation, onSelectCitation }: SummaryTextProps) {
+  if (!sentences.length) {
+    return null;
+  }
+  return (
+    <div className="whitespace-pre-wrap leading-relaxed">
+      {sentences.map((sentence, index) => (
+        <SentenceFragment
+          key={`${sentence.text}-${index}`}
+          sentence={sentence}
+          isLast={index === sentences.length - 1}
+          activeCitation={activeCitation}
+          onSelectCitation={onSelectCitation}
+        />
+      ))}
+    </div>
+  );
+}
+
+type SentenceFragmentProps = {
+  sentence: SummarySentence;
+  isLast: boolean;
+  activeCitation: number | null;
+  onSelectCitation: (citation: number) => void;
+};
+
+function SentenceFragment({
+  sentence,
+  isLast,
+  activeCitation,
+  onSelectCitation
+}: SentenceFragmentProps) {
+  return (
+    <span className="inline">
+      {sentence.text}
+      {sentence.citations.map((citation, idx) => {
+        const isActive = citation === activeCitation;
+        return (
+          <button
+            key={`${citation}-${idx}`}
+            type="button"
+            onClick={() => onSelectCitation(citation)}
+            className={cn(
+              "ml-1 inline-flex items-center rounded-sm border px-1.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              isActive
+                ? "border-primary bg-primary text-primary-foreground"
+                : "border-border/60 bg-muted text-muted-foreground hover:bg-primary/10 hover:text-primary"
+            )}
+            aria-pressed={isActive}
+            aria-label={`チャンク ${citation} に移動`}
+          >
+            [{citation}]
+          </button>
+        );
+      })}
+      {!isLast && " "}
+    </span>
+  );
 }

@@ -1,7 +1,0 @@
-{
-  "/(dashboard)/projects/[projectKey]/plot/page": "app/(dashboard)/projects/[projectKey]/plot/page.js",
-  "/(dashboard)/projects/[projectKey]/characters/page": "app/(dashboard)/projects/[projectKey]/characters/page.js",
-  "/(dashboard)/projects/[projectKey]/validation/page": "app/(dashboard)/projects/[projectKey]/validation/page.js",
-  "/(dashboard)/projects/manage/page": "app/(dashboard)/projects/manage/page.js",
-  "/(dashboard)/projects/[projectKey]/summary/page": "app/(dashboard)/projects/[projectKey]/summary/page.js"
-}

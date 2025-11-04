@@ -14,11 +14,7 @@ export default async function ProjectValidationPage({ params }: ValidationPagePr
     notFound();
   }
 
-  const validationEntries = project.entries.map((entry) => ({
-    id: entry.id,
-    summary: entry.summary ?? "",
-    text: entry.text
-  }));
+  const sentences = project.summarySentences ?? [];
 
   return (
     <section className="space-y-6">
@@ -28,7 +24,7 @@ export default async function ProjectValidationPage({ params }: ValidationPagePr
           要約ブロックの順序を整え、LLMにより表現候補や再構成要約を生成します。
         </p>
       </header>
-      <ValidationClient projectKey={project.key} entries={validationEntries} />
+      <ValidationClient projectKey={project.key} entries={project.entries} sentences={sentences} />
     </section>
   );
 }

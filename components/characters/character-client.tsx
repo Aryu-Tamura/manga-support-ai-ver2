@@ -1,7 +1,8 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 import { generateCharacterAnalysisAction } from "@/app/(dashboard)/projects/[projectKey]/characters/actions";
+import { CitationList } from "@/components/shared/citation-list";
 import { SourcePanel } from "@/components/summary/source-panel";
 import { cn } from "@/lib/utils";
 import type { CharacterContext } from "@/lib/characters/utils";
@@ -37,6 +38,7 @@ export function CharacterClient({
   const [analysisState, setAnalysisState] = useState<AnalysisState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [activeCitation, setActiveCitation] = useState<number | null>(null);
 
   const activeCharacter = useMemo(
     () => characters.find((item) => item.name === selectedName) ?? null,
@@ -52,6 +54,7 @@ export function CharacterClient({
       return;
     }
     setErrorMessage(null);
+    setActiveCitation(null);
     startTransition(async () => {
       const response = await generateCharacterAnalysisAction({
         projectKey,
@@ -68,6 +71,15 @@ export function CharacterClient({
       });
     });
   };
+
+  useEffect(() => {
+    const citations = analysisState?.citations ?? [];
+    if (!citations.length) {
+      setActiveCitation(null);
+      return;
+    }
+    setActiveCitation((current) => (current && citations.includes(current) ? current : citations[0]));
+  }, [analysisState?.citations]);
 
   if (characters.length === 0) {
     return (
@@ -167,17 +179,19 @@ export function CharacterClient({
               </p>
             )}
           </div>
-          {analysisState?.citations.length ? (
-            <div className="rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-              引用チャンク: {analysisState.citations.join(", ")}
-            </div>
-          ) : null}
+          <CitationList
+            citations={analysisState?.citations ?? []}
+            activeId={activeCitation}
+            onSelect={(id) => setActiveCitation(id)}
+            className="rounded-md bg-muted/40 px-3 py-2"
+          />
         </section>
       </div>
 
       <SourcePanel
         entries={activeContexts}
         highlightedIds={analysisState?.citations ?? []}
+        activeId={activeCitation}
       />
     </div>
   );
