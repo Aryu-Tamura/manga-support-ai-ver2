@@ -248,6 +248,72 @@ export async function registerNewProject(input: {
   await writeIndexFile(filtered);
 }
 
+export async function overwriteProjectData(input: {
+  key: string;
+  title: string;
+  summary: string;
+  entries: unknown[];
+  fullText: string;
+  characters: unknown[];
+  summarySentences?: SummarySentence[];
+  summaryUpdatedAt?: string;
+}): Promise<void> {
+  const {
+    key,
+    title,
+    summary,
+    entries,
+    fullText,
+    characters,
+    summarySentences = [],
+    summaryUpdatedAt
+  } = input;
+
+  if (SAMPLE_PROJECT_KEYS.has(key)) {
+    throw new Error("サンプルプロジェクトは上書きできません。");
+  }
+
+  const definitions = await listProjectDefinitions();
+  const definition = definitions.find((item) => item.key === key);
+  if (!definition) {
+    throw new Error("プロジェクト定義が見つかりません。");
+  }
+
+  const payload = {
+    summary,
+    summary_sentences: serializeSummarySentences(summarySentences),
+    summary_updated_at: summaryUpdatedAt ?? new Date().toISOString(),
+    entries: Array.isArray(entries) ? serializeEntryRecords(entries as EntryRecord[]) : [],
+    full_text: fullText
+  };
+
+  await fs.mkdir(path.dirname(definition.panelFile), { recursive: true });
+  await fs.writeFile(definition.panelFile, JSON.stringify(payload, null, 2), "utf-8");
+
+  await fs.mkdir(path.dirname(definition.characterFile), { recursive: true });
+  await fs.writeFile(definition.characterFile, JSON.stringify(characters ?? [], null, 2), "utf-8");
+
+  const indexEntries = await readIndexFile();
+  const existing = indexEntries.find((entry) => entry.key === key);
+  const relativePanel = toRelativeDataPath(definition.panelFile);
+  const relativeCharacter = toRelativeDataPath(definition.characterFile);
+
+  if (existing) {
+    existing.title = title;
+    existing.panel_file = relativePanel;
+    existing.character_file = relativeCharacter;
+  } else {
+    indexEntries.push({
+      key,
+      title,
+      panel_file: relativePanel,
+      character_file: relativeCharacter
+    });
+  }
+
+  await writeIndexFile(indexEntries);
+}
+
 const ENTRY_SUMMARY_LIMIT = 280;
 
 function buildEntrySummaryMap(
