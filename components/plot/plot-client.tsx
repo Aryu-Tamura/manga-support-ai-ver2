@@ -90,8 +90,9 @@ export function PlotClient({
         setDownloadMessage(response.message);
         return;
       }
-      const arrayBuffer = base64ToUint8Array(response.base64);
-      const blob = new Blob([arrayBuffer], { type: response.mime });
+      const bytes = base64ToUint8Array(response.base64);
+      const buffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      const blob = new Blob([buffer], { type: response.mime });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement("a");
       anchor.href = url;
