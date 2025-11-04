@@ -190,12 +190,6 @@ export async function listProjectDefinitions(): Promise<ProjectDefinition[]> {
       title: "プロジェクト1：銀河鉄道の夜",
       panel_file: "gingatetudono_yoru_labeled.json",
       character_file: "character_gingatetudonoyoru.json"
-    },
-    {
-      key: "project2",
-      title: "プロジェクト2：井上尚弥の書籍",
-      panel_file: "inouenaoya_labeled.json",
-      character_file: "character_inouenaoya.json"
     }
   ].map(normaliseDefinition);
 

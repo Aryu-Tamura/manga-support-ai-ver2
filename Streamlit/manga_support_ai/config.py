@@ -16,12 +16,6 @@ BASE_PROJECT_DEFINITIONS = [
         "panel_file": DATA_DIR / "gingatetudono_yoru_labeled.json",
         "character_file": DATA_DIR / "character_gingatetudonoyoru.json",
     },
-    {
-        "key": "project2",
-        "title": "プロジェクト2：井上尚弥の書籍",
-        "panel_file": DATA_DIR / "inouenaoya_labeled.json",
-        "character_file": DATA_DIR / "character_inouenaoya.json",
-    },
 ]
 
 PROJECT_INDEX_FILE = DATA_DIR / "projects_index.json"
