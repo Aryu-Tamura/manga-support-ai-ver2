@@ -188,7 +188,7 @@ export async function createProjectFromUploadAction(
     logInfo("Upload pipeline completed", { key });
     return {
       ok: true,
-      message: `『${parsed.data.title}』のアップロードを受け付けました（${saved.fileName}）。解析済みサンプルを登録しました。`
+      message: `『${parsed.data.title}』のアップロードを受け付けました（${saved.fileName} / チャンク目標 ${parsed.data.chunkTarget ?? 250}字）。解析済みデータを登録しました。`
     };
   } catch (error) {
     logError("アップロード処理でエラー", { title: parsed.data.title, error: String(error) });
@@ -269,7 +269,10 @@ export async function relabelProjectAction(
     });
     logInfo("Relabel pipeline completed", { key });
 
-    return { ok: true, message: "本文を再解析し、チャンク情報を更新しました。" };
+    return {
+      ok: true,
+      message: `本文を再解析し、チャンク情報を更新しました（チャンク目標 ${chunkTarget ?? 250}字）。`
+    };
   } catch (error) {
     logError("再ラベル処理でエラー", { key, error: String(error) });
     recordAuditEvent({

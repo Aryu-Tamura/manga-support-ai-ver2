@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import {
   deleteProjectAction,
@@ -55,9 +55,15 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
   const [isUpdating, startUpdateTransition] = useTransition();
   const [isDeleting, startDeleteTransition] = useTransition();
+  const [expandedKey, setExpandedKey] = useState<string | null>(projects[0]?.key ?? null);
 
   const [uploadMessage, setUploadMessage] = useState<MessageState>(null);
-  const [uploadSteps, setUploadSteps] = useState<string[]>([]);
+  const uploadStepLabels = [
+    "ファイルをアップロード",
+    "本文解析とチャンク生成",
+    "プロジェクトを登録"
+  ];
+  const [uploadSteps, setUploadSteps] = useState<number>(0);
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
@@ -72,6 +78,11 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
   const [isRelabeling, startRelabelTransition] = useTransition();
 
   const formMap = useMemo(() => new Map(forms.map((form) => [form.key, form])), [forms]);
+  useEffect(() => {
+    if (!expandedKey || !projects.some((project) => project.key === expandedKey)) {
+      setExpandedKey(projects[0]?.key ?? null);
+    }
+  }, [projects, expandedKey]);
 
   const handleFieldChange = (key: string, field: "title" | "summary", value: string) => {
     setForms((prev) =>
@@ -192,33 +203,37 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
     }
     setUploadMessage(null);
     startUploadTransition(async () => {
-      setUploadSteps(["1. ファイルをアップロードしています…"]);
-      const formData = new FormData();
-      formData.append("title", uploadTitle.trim());
-      formData.append("styleHint", uploadStyleHint);
-      formData.append("file", uploadFile, uploadFile.name);
-      formData.append("chunkTarget", String(uploadChunkSize));
-      setUploadSteps((prev) => [...prev, "2. 本文解析とチャンク生成を実行中…"]);
-      const response = await createProjectFromUploadAction(formData);
-      setUploadSteps((prev) => [...prev, "3. プロジェクトを登録中…"]);
-      setUploadMessage({
-        type: response.ok ? "success" : "error",
-        text: response.message
-      });
-      if (response.ok) {
-        setUploadTitle("");
-        setUploadStyleHint("");
-        setUploadFile(null);
-        setUploadFileName(null);
-        setUploadChunkSize(250);
-        if (fileInputRef.current) {
-          fileInputRef.current.value = "";
-        }
-        setGlobalMessage({
-          type: "info",
-          text: "アップロード済みファイルは解析済みプロジェクトとして登録されました。"
+      setUploadSteps(1);
+      try {
+        const formData = new FormData();
+        formData.append("title", uploadTitle.trim());
+        formData.append("styleHint", uploadStyleHint);
+        formData.append("file", uploadFile, uploadFile.name);
+        formData.append("chunkTarget", String(uploadChunkSize));
+        setUploadSteps(2);
+        const response = await createProjectFromUploadAction(formData);
+        setUploadSteps(3);
+        setUploadMessage({
+          type: response.ok ? "success" : "error",
+          text: response.message
         });
-        router.refresh();
+        if (response.ok) {
+          setUploadTitle("");
+          setUploadStyleHint("");
+          setUploadFile(null);
+          setUploadFileName(null);
+          setUploadChunkSize(250);
+          if (fileInputRef.current) {
+            fileInputRef.current.value = "";
+          }
+          setGlobalMessage({
+            type: "info",
+            text: "アップロード済みファイルは解析済みプロジェクトとして登録されました。"
+          });
+          router.refresh();
+        }
+      } finally {
+        setUploadSteps(0);
       }
     });
   };
@@ -311,7 +326,7 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
                 isUploading && "cursor-not-allowed opacity-60"
               )}
             >
-              {isUploading ? "準備中…" : "LLM解析ジョブを起動（準備中）"}
+              {isUploading ? "処理中…" : "LLM解析ジョブを起動"}
             </button>
             {uploadMessage && (
               <p
@@ -325,11 +340,21 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
                 {uploadMessage.text}
               </p>
             )}
-            {uploadSteps.length > 0 && (
-              <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                {uploadSteps.map((step, index) => (
-                  <p key={index}>{step}</p>
-                ))}
+            {uploadSteps > 0 && (
+              <div className="space-y-2 rounded-md border border-dashed border-muted-foreground/40 bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div className="h-2 w-full rounded-full bg-muted">
+                  <div
+                    className="h-2 rounded-full bg-primary transition-all"
+                    style={{ width: `${(uploadSteps / uploadStepLabels.length) * 100}%` }}
+                  />
+                </div>
+                <ul className="space-y-1">
+                  {uploadStepLabels.map((label, index) => (
+                    <li key={label} className={index < uploadSteps ? "text-foreground" : "text-muted-foreground"}>
+                      {index + 1}. {label}
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </div>
@@ -353,165 +378,176 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
         <header className="space-y-1">
           <h3 className="text-lg font-semibold tracking-tight">登録済みプロジェクト</h3>
           <p className="text-sm text-muted-foreground">
-            プロジェクト名とサマリーの更新、削除（サンプル以外）が行えます。再ラベル付け機能も今後追加予定です。
+            プロジェクト名とサマリーの更新、削除（サンプル以外）が行えます。LLM を利用した再ラベルもここから実行できます。
           </p>
         </header>
 
-        <div className="space-y-4">
+        <div className="space-y-2">
           {projects.map((project) => {
             const form = formMap.get(project.key);
             const message = messages[project.key];
             const disabled = project.isSample;
+            const isExpanded = expandedKey === project.key;
             return (
               <article
                 key={project.key}
                 className={cn(
-                  "space-y-4 rounded-lg border border-border bg-card p-5 shadow-sm",
+                  "rounded-lg border border-border bg-card p-4 shadow-sm transition",
                   disabled && "opacity-90"
                 )}
               >
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <h4 className="text-base font-semibold text-foreground">
-                      {project.title}（{project.key}）
-                    </h4>
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                      チャンク {project.chunkCount} / キャラクター {project.characterCount}
-                    </p>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedKey(isExpanded ? null : project.key)}
+                    className="flex w-full items-center justify-between text-left"
+                  >
+                    <div className="flex flex-col">
+                      <h4 className="text-base font-semibold text-foreground">{project.title}</h4>
+                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                        チャンク {project.chunkCount} / キャラクター {project.characterCount}
+                      </p>
+                    </div>
+                    <span className="text-sm text-muted-foreground">
+                      {isExpanded ? "▲" : "▼"}
+                    </span>
+                  </button>
                   {project.isSample && (
                     <span className="rounded-full border border-muted-foreground/40 px-3 py-1 text-xs font-medium text-muted-foreground">
                       サンプル（編集不可）
                     </span>
                   )}
                 </div>
+                {isExpanded && (
+                  <div className="mt-4 space-y-4">
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        プロジェクト名
+                      </span>
+                      <input
+                        type="text"
+                        value={form?.title ?? ""}
+                        onChange={(event) => handleFieldChange(project.key, "title", event.target.value)}
+                        disabled={disabled}
+                        className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+                      />
+                    </label>
 
-                <label className="flex flex-col gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    プロジェクト名
-                  </span>
-                  <input
-                    type="text"
-                    value={form?.title ?? ""}
-                    onChange={(event) => handleFieldChange(project.key, "title", event.target.value)}
-                    disabled={disabled}
-                    className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
-                  />
-                </label>
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        作品サマリー
+                      </span>
+                      <textarea
+                        value={form?.summary ?? ""}
+                        onChange={(event) =>
+                          handleFieldChange(project.key, "summary", event.target.value)
+                        }
+                        rows={4}
+                        disabled={disabled}
+                        className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+                      />
+                    </label>
 
-                <label className="flex flex-col gap-2">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                    作品サマリー
-                  </span>
-                  <textarea
-                    value={form?.summary ?? ""}
-                    onChange={(event) =>
-                      handleFieldChange(project.key, "summary", event.target.value)
-                    }
-                    rows={4}
-                disabled={disabled}
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
-              />
-            </label>
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        再ラベル用ヒント（任意）
+                      </span>
+                      <textarea
+                        value={relabelHints[project.key] ?? ""}
+                        onChange={(event) =>
+                          setRelabelHints((prev) => ({
+                            ...prev,
+                            [project.key]: event.target.value
+                          }))
+                        }
+                        rows={3}
+                        disabled={disabled}
+                        placeholder="キャラクターの補足・チャンク分割時に意識したい点など"
+                        className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+                      />
+                    </label>
 
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                再ラベル用ヒント（任意）
-              </span>
-              <textarea
-                value={relabelHints[project.key] ?? ""}
-                onChange={(event) =>
-                  setRelabelHints((prev) => ({
-                    ...prev,
-                    [project.key]: event.target.value
-                  }))
-                }
-                rows={3}
-                disabled={disabled}
-                placeholder="キャラクターの補足・チャンク分割時に意識したい点など"
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
-              />
-            </label>
+                    <label className="flex flex-col gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        再ラベル目標文字数（80〜600）
+                      </span>
+                      <input
+                        type="number"
+                        min={80}
+                        max={600}
+                        value={relabelChunkSizes[project.key] ?? 250}
+                        onChange={(event) =>
+                          setRelabelChunkSizes((prev) => ({
+                            ...prev,
+                            [project.key]: Number(event.target.value) || 250
+                          }))
+                        }
+                        disabled={disabled}
+                        className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
+                      />
+                    </label>
 
-            <label className="flex flex-col gap-2">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                再ラベル目標文字数（80〜600）
-              </span>
-              <input
-                type="number"
-                min={80}
-                max={600}
-                value={relabelChunkSizes[project.key] ?? 250}
-                onChange={(event) =>
-                  setRelabelChunkSizes((prev) => ({
-                    ...prev,
-                    [project.key]: Number(event.target.value) || 250
-                  }))
-                }
-                disabled={disabled}
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted"
-              />
-            </label>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={() => handleUpdate(project)}
+                        disabled={disabled || pendingKey === project.key || isUpdating}
+                        className={cn(
+                          "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
+                          "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                          (disabled || pendingKey === project.key || isUpdating) &&
+                            "cursor-not-allowed opacity-60"
+                        )}
+                      >
+                        {pendingKey === project.key && isUpdating ? "保存中…" : "保存する"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRelabel(project)}
+                        disabled={
+                          disabled || relabelKey === project.key || isRelabeling || project.chunkCount === 0
+                        }
+                        className={cn(
+                          "inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition",
+                          "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                          (disabled || relabelKey === project.key || isRelabeling || project.chunkCount === 0) &&
+                            "cursor-not-allowed opacity-60"
+                        )}
+                      >
+                        {relabelKey === project.key && isRelabeling ? "再ラベル中…" : "LLMで再ラベル"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleDelete(project)}
+                        disabled={disabled || pendingKey === project.key || isDeleting}
+                        className={cn(
+                          "inline-flex items-center justify-center rounded-md border border-destructive px-4 py-2 text-sm font-semibold text-destructive transition",
+                          "hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2",
+                          (disabled || pendingKey === project.key || isDeleting) &&
+                            "cursor-not-allowed opacity-60"
+                        )}
+                      >
+                        {pendingKey === project.key && isDeleting
+                          ? "削除中…"
+                          : deleteConfirmation === project.key
+                            ? "削除を確定"
+                            : "削除する"}
+                      </button>
+                    </div>
 
-            <div className="flex flex-wrap items-center gap-3">
-              <button
-                type="button"
-                onClick={() => handleUpdate(project)}
-                    disabled={disabled || pendingKey === project.key || isUpdating}
-                    className={cn(
-                      "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
-                      "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                      (disabled || pendingKey === project.key || isUpdating) &&
-                        "cursor-not-allowed opacity-60"
-                )}
-              >
-                {pendingKey === project.key && isUpdating ? "保存中…" : "保存する"}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleRelabel(project)}
-                disabled={
-                  disabled || relabelKey === project.key || isRelabeling || project.chunkCount === 0
-                }
-                className={cn(
-                  "inline-flex items-center justify-center rounded-md border border-border px-4 py-2 text-sm font-semibold text-foreground transition",
-                  "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  (disabled || relabelKey === project.key || isRelabeling || project.chunkCount === 0) &&
-                    "cursor-not-allowed opacity-60"
-                )}
-              >
-                {relabelKey === project.key && isRelabeling ? "再ラベル中…" : "LLMで再ラベル"}
-              </button>
-              <button
-                type="button"
-                onClick={() => handleDelete(project)}
-                disabled={disabled || pendingKey === project.key || isDeleting}
-                    className={cn(
-                      "inline-flex items-center justify-center rounded-md border border-destructive px-4 py-2 text-sm font-semibold text-destructive transition",
-                      "hover:bg-destructive/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-destructive focus-visible:ring-offset-2",
-                      (disabled || pendingKey === project.key || isDeleting) &&
-                        "cursor-not-allowed opacity-60"
+                    {message && (
+                      <p
+                        className={cn(
+                          "text-sm",
+                          message.type === "success" && "text-emerald-600",
+                          message.type === "error" && "text-destructive",
+                          message.type === "info" && "text-muted-foreground"
+                        )}
+                      >
+                        {message.text}
+                      </p>
                     )}
-                  >
-                    {pendingKey === project.key && isDeleting
-                      ? "削除中…"
-                      : deleteConfirmation === project.key
-                        ? "削除を確定"
-                        : "削除する"}
-                  </button>
-                </div>
-
-                {message && (
-                  <p
-                    className={cn(
-                      "text-sm",
-                      message.type === "success" && "text-emerald-600",
-                      message.type === "error" && "text-destructive",
-                      message.type === "info" && "text-muted-foreground"
-                    )}
-                  >
-                    {message.text}
-                  </p>
+                  </div>
                 )}
               </article>
             );
