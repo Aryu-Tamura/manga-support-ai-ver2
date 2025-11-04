@@ -1,7 +1,6 @@
 import { notFound } from "next/navigation";
 import { PictureBookClient } from "@/components/picture-book/picture-book-client";
-import { generatePictureBookDraft } from "@/lib/picture-book/llm-generator";
-import { PICTURE_BOOK_PAGE_OPTIONS, buildInitialPictureBookPages } from "@/lib/picture-book/utils";
+import { DEFAULT_PICTURE_BOOK_PAGE_COUNT, buildInitialPictureBookPages } from "@/lib/picture-book/utils";
 import { getProjectByKey } from "@/lib/projects/repository";
 
 type PictureBookPageProps = {
@@ -17,17 +16,7 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
   }
 
   const summarySentences = project.summarySentences ?? [];
-  const defaultPageCount = PICTURE_BOOK_PAGE_OPTIONS[1] ?? 12;
-
-  const llmDraft = await generatePictureBookDraft({
-    projectTitle: project.title,
-    entries: project.entries,
-    sentences: summarySentences,
-    pageCount: defaultPageCount
-  });
-
-  const initialPages = llmDraft ?? buildInitialPictureBookPages(summarySentences, project.entries, defaultPageCount);
-  const initialSource = llmDraft ? "llm" : "fallback";
+  const initialPages = buildInitialPictureBookPages(summarySentences, project.entries, DEFAULT_PICTURE_BOOK_PAGE_COUNT);
 
   return (
     <section className="space-y-6">
@@ -43,7 +32,7 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
         entries={project.entries}
         sentences={summarySentences}
         initialPages={initialPages}
-        initialSource={initialSource}
+        initialSource="fallback"
       />
     </section>
   );

@@ -12,7 +12,9 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ja" suppressHydrationWarning>
-      <body className={`${inter.variable} font-sans bg-background text-foreground antialiased`}>
+      <body
+        className={`${inter.variable} font-sans bg-background text-foreground antialiased select-text`}
+      >
         {children}
       </body>
     </html>

@@ -25,6 +25,7 @@ type SummaryClientProps = {
 
 type SummaryState =
   | {
+      summaryText: string;
       sentences: SummarySentence[];
       citations: number[];
       mode: "llm" | "sample";
@@ -45,13 +46,22 @@ export function SummaryClient({
   const [grain, setGrain] = useState(
     grainOptions.includes(DEFAULT_SUMMARY_GRAIN)
       ? DEFAULT_SUMMARY_GRAIN
-      : grainOptions[0] ?? DEFAULT_SUMMARY_GRAIN
+      : grainOptions[Math.floor(grainOptions.length / 2)] ?? DEFAULT_SUMMARY_GRAIN
   );
   const [summaryState, setSummaryState] = useState<SummaryState>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [activeCitation, setActiveCitation] = useState<number | null>(null);
   const [portalTarget, setPortalTarget] = useState<HTMLElement | null>(null);
+  const minGrain = useMemo(
+    () => (grainOptions.length ? Math.min(...grainOptions) : DEFAULT_SUMMARY_GRAIN),
+    [grainOptions]
+  );
+  const maxGrain = useMemo(
+    () => (grainOptions.length ? Math.max(...grainOptions) : DEFAULT_SUMMARY_GRAIN),
+    [grainOptions]
+  );
+  const grainStep = 50;
 
   const effectiveStart = rangeMode === "all" ? 1 : clamp(startId, 1, chunkCount);
   const effectiveEnd =
@@ -123,6 +133,7 @@ export function SummaryClient({
         return;
       }
       setSummaryState({
+        summaryText: response.summary,
         sentences: response.sentences,
         citations: response.citations,
         mode: response.mode
@@ -158,6 +169,16 @@ export function SummaryClient({
   }, []);
 
   useEffect(() => {
+    if (!summaryState) {
+      return;
+    }
+    notifySummaryPreviewUpdate({
+      summary: summaryState.summaryText,
+      sentences: summaryState.sentences
+    });
+  }, [summaryState]);
+
+  useEffect(() => {
     if (!sourcePanelContainerId || typeof window === "undefined") {
       setPortalTarget(null);
       return;
@@ -168,125 +189,117 @@ export function SummaryClient({
 
   return (
     <div className="space-y-6">
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
-        <section className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-sm">
-          <header className="space-y-2">
-            <h3 className="text-lg font-semibold tracking-tight">要約設定</h3>
-            <p className="text-sm text-muted-foreground">
-              対象チャンク範囲と文字数の目安を指定し、要約生成を実行します。
-            </p>
-          </header>
+      <section className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-sm">
+        <header className="space-y-2">
+          <h3 className="text-lg font-semibold tracking-tight">要約設定</h3>
+          <p className="text-xs uppercase tracking-wide text-muted-foreground">
+            対象: {projectTitle}
+          </p>
+        </header>
 
-          <div className="space-y-4">
-            <fieldset className="flex flex-col gap-2">
-              <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                範囲
-              </legend>
-              <div className="flex flex-wrap gap-3">
-                <RangeToggle
-                  label="全体"
-                  active={rangeMode === "all"}
-                  onClick={() => handleRangeModeChange("all")}
-                />
-                <RangeToggle
-                  label="チャンク範囲"
-                  active={rangeMode === "custom"}
-                  onClick={() => handleRangeModeChange("custom")}
-                />
-              </div>
-            </fieldset>
-
-            <div className="grid grid-cols-2 gap-4">
-              <NumberField
-                id="summary-start"
-                label="開始チャンク"
-                value={startId}
-                min={1}
-                max={chunkCount}
-                disabled={rangeMode === "all"}
-                onChange={(value) => setStartId(value)}
+        <div className="space-y-4">
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              範囲
+            </legend>
+            <div className="flex flex-wrap gap-3">
+              <RangeToggle
+                label="全体"
+                active={rangeMode === "all"}
+                onClick={() => handleRangeModeChange("all")}
               />
-              <NumberField
-                id="summary-end"
-                label="終了チャンク"
-                value={endId}
-                min={1}
-                max={chunkCount}
-                disabled={rangeMode === "all"}
-                onChange={(value) => setEndId(value)}
+              <RangeToggle
+                label="チャンク範囲"
+                active={rangeMode === "custom"}
+                onClick={() => handleRangeModeChange("custom")}
               />
             </div>
+          </fieldset>
 
-            <div className="space-y-2">
-              <label
-                htmlFor="summary-grain"
-                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                文字数の目安
-              </label>
-              <select
+          <div className="grid grid-cols-2 gap-4">
+            <NumberField
+              id="summary-start"
+              label="開始チャンク"
+              value={startId}
+              min={1}
+              max={chunkCount}
+              disabled={rangeMode === "all"}
+              onChange={(value) => setStartId(value)}
+            />
+            <NumberField
+              id="summary-end"
+              label="終了チャンク"
+              value={endId}
+              min={1}
+              max={chunkCount}
+              disabled={rangeMode === "all"}
+              onChange={(value) => setEndId(value)}
+            />
+          </div>
+
+          <div className="space-y-2">
+            <label
+              htmlFor="summary-grain"
+              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            >
+              文字数の目安
+            </label>
+            <div className="space-y-1">
+              <input
                 id="summary-grain"
+                type="range"
+                min={minGrain}
+                max={maxGrain}
+                step={grainStep}
+                list="summary-grain-ticks"
                 value={grain}
                 onChange={(event) => setGrain(Number.parseInt(event.target.value, 10))}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm font-medium outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              >
-                {grainOptions.map((option) => (
-                  <option key={option} value={option}>
-                    約 {option} 文字
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-              選択中: チャンク {effectiveStart}〜{effectiveEnd}（全 {selectedEntries.length} 件）
-            </div>
-
-            <button
-              type="button"
-              onClick={handleGenerate}
-              disabled={isPending || selectedEntries.length === 0}
-              className={cn(
-                "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
-                "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                (isPending || selectedEntries.length === 0) && "cursor-not-allowed opacity-60"
-              )}
-            >
-              {isPending ? "生成中…" : "要約を生成"}
-            </button>
-            {errorMessage && (
-              <p className="text-sm text-destructive" role="alert">
-                {errorMessage}
-              </p>
-            )}
-          </div>
-        </section>
-
-        <section className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-sm">
-          <header className="space-y-1">
-            <h3 className="text-lg font-semibold tracking-tight">要約結果</h3>
-            <p className="text-sm text-muted-foreground">{projectTitle}</p>
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              {summaryState?.mode === "llm"
-                ? "LLMモード（OpenAI連携）"
-                : "サンプルモード（OpenAI未接続）"}
-            </p>
-          </header>
-          <div className="min-h-[200px] rounded-md border border-border/60 bg-background/80 p-4 text-sm leading-relaxed text-foreground">
-            {summaryState && summaryState.sentences.length ? (
-              <SummaryText
-                sentences={summaryState.sentences}
-                onSelectCitation={setActiveCitation}
-                activeCitation={activeCitation}
+                className="w-full accent-primary"
               />
-            ) : (
-              <p className="text-muted-foreground">
-                要約がここに表示されます。範囲と文字数を指定して生成してください。
-              </p>
-            )}
+              <div className="flex items-center justify-between text-xs text-muted-foreground">
+                <span>約 {grain} 文字</span>
+                <span>
+                  {minGrain}–{maxGrain}
+                </span>
+              </div>
+            </div>
+            <datalist id="summary-grain-ticks">
+              {grainOptions.map((option) => (
+                <option key={option} value={option} label={`${option}`} />
+              ))}
+            </datalist>
           </div>
-        </section>
-      </div>
+
+          <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+            選択中: チャンク {effectiveStart}〜{effectiveEnd}（全 {selectedEntries.length} 件）
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={isPending || selectedEntries.length === 0}
+            className={cn(
+              "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
+              "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              (isPending || selectedEntries.length === 0) && "cursor-not-allowed opacity-60"
+            )}
+          >
+            {isPending ? "生成中…" : "要約を生成"}
+          </button>
+          {summaryState && (
+            <p className="text-xs uppercase tracking-wide text-muted-foreground">
+              {summaryState.mode === "llm"
+                ? "LLMモードで生成済みの要約が下部に反映されています。"
+                : "サンプルモードで生成済みの要約が下部に反映されています。"}
+            </p>
+          )}
+          {errorMessage && (
+            <p className="text-sm text-destructive" role="alert">
+              {errorMessage}
+            </p>
+          )}
+        </div>
+      </section>
 
       {sourcePanelContainerId
         ? portalTarget
@@ -367,68 +380,18 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(Math.max(value, min), max);
 }
 
-type SummaryTextProps = {
+type SummaryPreviewUpdateDetail = {
+  summary: string;
   sentences: SummarySentence[];
-  activeCitation: number | null;
-  onSelectCitation: (citation: number) => void;
 };
 
-function SummaryText({ sentences, activeCitation, onSelectCitation }: SummaryTextProps) {
-  if (!sentences.length) {
-    return null;
+function notifySummaryPreviewUpdate(detail: SummaryPreviewUpdateDetail) {
+  if (typeof window === "undefined") {
+    return;
   }
-  return (
-    <div className="whitespace-pre-wrap leading-relaxed">
-      {sentences.map((sentence, index) => (
-        <SentenceFragment
-          key={`${sentence.text}-${index}`}
-          sentence={sentence}
-          isLast={index === sentences.length - 1}
-          activeCitation={activeCitation}
-          onSelectCitation={onSelectCitation}
-        />
-      ))}
-    </div>
-  );
-}
-
-type SentenceFragmentProps = {
-  sentence: SummarySentence;
-  isLast: boolean;
-  activeCitation: number | null;
-  onSelectCitation: (citation: number) => void;
-};
-
-function SentenceFragment({
-  sentence,
-  isLast,
-  activeCitation,
-  onSelectCitation
-}: SentenceFragmentProps) {
-  return (
-    <span className="inline">
-      {sentence.text}
-      {sentence.citations.map((citation, idx) => {
-        const isActive = citation === activeCitation;
-        return (
-          <button
-            key={`${citation}-${idx}`}
-            type="button"
-            onClick={() => onSelectCitation(citation)}
-            className={cn(
-              "ml-1 inline-flex items-center rounded-sm border px-1.5 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              isActive
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border/60 bg-muted text-muted-foreground hover:bg-primary/10 hover:text-primary"
-            )}
-            aria-pressed={isActive}
-            aria-label={`チャンク ${citation} に移動`}
-          >
-            [{citation}]
-          </button>
-        );
-      })}
-      {!isLast && " "}
-    </span>
+  window.dispatchEvent(
+    new CustomEvent<SummaryPreviewUpdateDetail>("summary:preview-update", {
+      detail
+    })
   );
 }

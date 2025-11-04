@@ -27,8 +27,7 @@ export default async function ProjectSummaryPage({ params }: SummaryPageProps) {
       <header className="space-y-2">
         <h2 className="text-2xl font-bold tracking-tight">{project.title}</h2>
         <p className="text-muted-foreground">
-          原作チャンクの範囲と文字数を指定して要約を生成します。Streamlit 版の操作感を踏襲しつつ、
-          shadcn/ui + Tailwind に最適化した UI を提供します。
+          原作チャンクの範囲と文字数を指定して要約を生成します。
         </p>
       </header>
       <SummaryClient

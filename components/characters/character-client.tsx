@@ -95,9 +95,6 @@ export function CharacterClient({
         <section className="space-y-5 rounded-lg border border-border bg-card p-6 shadow-sm">
           <header className="space-y-2">
             <h3 className="text-lg font-semibold tracking-tight">キャラクター情報</h3>
-            <p className="text-sm text-muted-foreground">
-              分析したいキャラクターを選択し、本文抜粋を確認してから解析メモを生成します。
-            </p>
           </header>
 
           <div className="space-y-4">

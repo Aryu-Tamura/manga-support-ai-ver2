@@ -1,6 +1,7 @@
 import type { EntryRecord, SummarySentence } from "@/lib/projects/types";
 
-export const PICTURE_BOOK_PAGE_OPTIONS = [8, 12, 16, 24] as const;
+export const PICTURE_BOOK_PAGE_OPTIONS = [8, 12, 16] as const;
+export const DEFAULT_PICTURE_BOOK_PAGE_COUNT = PICTURE_BOOK_PAGE_OPTIONS[0];
 
 export const PICTURE_BOOK_PHASES = ["起", "承", "転", "結"] as const;
 
@@ -267,10 +268,10 @@ function formatDialogueLine(speaker: string, content: string): string {
     return "";
   }
   const limited = clampCharacters(cleaned, MAX_DIALOGUE_LENGTH);
-  if (!speaker) {
-    return `「${limited}」`;
+  if (!speaker || speaker === "語り手") {
+    return limited;
   }
-  return `${speaker}：「${limited}」`;
+  return `${speaker}「${limited}」`;
 }
 
 function sanitizeSpeaker(value: string) {

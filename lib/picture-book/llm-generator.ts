@@ -6,6 +6,7 @@ import {
   buildPhaseDistribution,
   buildImagePrompt,
   clampCharacters,
+  buildInitialPictureBookPages,
   type PictureBookPage,
   type PictureBookPhase
 } from "@/lib/picture-book/utils";
@@ -39,6 +40,8 @@ export async function generatePictureBookDraft(
   const { projectTitle, entries, sentences, pageCount } = params;
   const effectiveCount = Math.max(1, pageCount);
 
+  const fallbackPages = buildInitialPictureBookPages(sentences, entries, effectiveCount);
+
   const summaryPoints =
     sentences.length > 0
       ? sentences
@@ -69,7 +72,7 @@ export async function generatePictureBookDraft(
     '- 各要素は {"phase": "起/承/転/結", "narration": "…", "dialogues": ["話者：セリフ", ...]} の形式。',
     "- phase は起承転結の順番でバランス良く割り当てること。",
     "- narration は状況説明を200文字以内の自然な日本語で書くこと。",
-    "- dialogues は各ページ2〜3行、100文字以内。話者名が判明していれば付け、なければ「語り手」。",
+    "- dialogues は各ページ2〜3行、100文字以内。「話者「セリフ」」の形式で、話者名が不明な場合はセリフのみを出力すること。",
     "- セリフ内に引用チャンク番号や脚注、括弧番号などは絶対に含めないこと。",
     "- JSON 以外の文章や説明は一切書かないこと。"
   ].join("\n");
@@ -98,7 +101,7 @@ export async function generatePictureBookDraft(
     if (!parsed || !Array.isArray(parsed.pages) || parsed.pages.length === 0) {
       return null;
     }
-    return normalisePages(parsed.pages, effectiveCount);
+    return normalisePages(parsed.pages, effectiveCount, fallbackPages);
   } catch (error) {
     console.error("絵本用ドラフト生成に失敗しました:", error);
     return null;
@@ -119,20 +122,27 @@ function parseResponse(raw: string): LlmPictureBookResponse | null {
   }
 }
 
-function normalisePages(rawPages: LlmPictureBookResponse["pages"], targetCount: number): PictureBookPage[] {
+function normalisePages(
+  rawPages: LlmPictureBookResponse["pages"],
+  targetCount: number,
+  fallbackPages: PictureBookPage[]
+): PictureBookPage[] {
   const results: PictureBookPage[] = [];
   const phases = distributePhases(rawPages, targetCount);
 
   for (let index = 0; index < targetCount; index += 1) {
-    const source = rawPages[index] ?? rawPages[rawPages.length - 1];
-    const phase = phases[index] ?? PICTURE_BOOK_PHASES[PICTURE_BOOK_PHASES.length - 1];
-    const narration = clampCharacters((source?.narration ?? "").replace(/\s+/g, " ").trim(), MAX_NARRATION_LENGTH);
-    const dialogues = Array.isArray(source?.dialogues)
-      ? source.dialogues
+    const rawSource = rawPages[index];
+    const fallback = fallbackPages[index] ?? fallbackPages[fallbackPages.length - 1];
+    const phase = phases[index] ?? fallback?.phase ?? PICTURE_BOOK_PHASES[PICTURE_BOOK_PHASES.length - 1];
+    const rawNarration = clampCharacters((rawSource?.narration ?? "").replace(/\s+/g, " ").trim(), MAX_NARRATION_LENGTH);
+    const narration =
+      rawNarration && rawNarration.length > 0 ? rawNarration : fallback?.narration ?? "シーンの概要を入力してください。";
+    const dialogues = Array.isArray(rawSource?.dialogues)
+      ? rawSource.dialogues
           .map((line) => clampCharacters(line.replace(/\s+/g, " ").trim(), MAX_DIALOGUE_LENGTH))
           .filter((line) => line.length > 0)
           .slice(0, 3)
-      : [];
+      : fallback?.dialogues ?? [];
     const ensuredDialogues = ensureMinimumDialogues(dialogues, narration || "");
 
     results.push({
@@ -143,7 +153,7 @@ function normalisePages(rawPages: LlmPictureBookResponse["pages"], targetCount: 
       dialogues: ensuredDialogues,
       imagePrompt: buildImagePrompt(phase, narration || ""),
       imageUrl: null,
-      citations: []
+      citations: fallback?.citations ?? []
     });
   }
 
@@ -250,11 +260,11 @@ function ensureMinimumDialogues(dialogues: string[], narration: string): string[
       break;
     }
     const content = clampCharacters(sentence, MAX_DIALOGUE_LENGTH);
-    results.push(`語り手：「${content}」`);
+    results.push(content);
   }
 
   while (results.length < 2 && results.length < 3) {
-    results.push("語り手：「……」");
+    results.push("……");
   }
 
   return results.slice(0, 3);
