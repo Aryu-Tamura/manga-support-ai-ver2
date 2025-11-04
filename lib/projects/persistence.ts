@@ -1,7 +1,7 @@
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listProjectDefinitions, getProjectByKey } from "@/lib/projects/repository";
-import type { ProjectDefinition } from "@/lib/projects/types";
+import type { EntryRecord, ProjectDefinition, SummarySentence } from "@/lib/projects/types";
 import { SAMPLE_PROJECT_KEYS } from "@/lib/projects/constants";
 
 const DATA_ROOT = path.join(process.cwd(), "Streamlit", "data");
@@ -34,11 +34,8 @@ async function writeIndexFile(entries: IndexEntry[]): Promise<void> {
   await fs.writeFile(INDEX_FILE, JSON.stringify(entries, null, 2), "utf-8");
 }
 
-function serializeEntries(project: Awaited<ReturnType<typeof getProjectByKey>>): unknown[] {
-  if (!project) {
-    return [];
-  }
-  return project.entries.map((entry) => ({
+function serializeEntryRecords(entries: EntryRecord[]): unknown[] {
+  return entries.map((entry) => ({
     id: entry.id,
     text: entry.text,
     type: entry.type,
@@ -51,6 +48,20 @@ function serializeEntries(project: Awaited<ReturnType<typeof getProjectByKey>>):
     entities: entry.entities,
     source_span: entry.sourceSpan,
     summary: entry.summary
+  }));
+}
+
+function serializeEntries(project: Awaited<ReturnType<typeof getProjectByKey>>): unknown[] {
+  if (!project) {
+    return [];
+  }
+  return serializeEntryRecords(project.entries);
+}
+
+function serializeSummarySentences(sentences: SummarySentence[]): unknown[] {
+  return sentences.map((sentence) => ({
+    text: sentence.text,
+    citations: sentence.citations
   }));
 }
 
@@ -88,6 +99,8 @@ export async function updateProjectMetadata(input: {
 
   const payload = {
     summary,
+    summary_sentences: serializeSummarySentences(project.summarySentences ?? []),
+    summary_updated_at: project.summaryUpdatedAt || new Date().toISOString(),
     entries: serializeEntries(project),
     full_text: project.fullText
   };
@@ -109,6 +122,39 @@ export async function updateProjectMetadata(input: {
     });
     await writeIndexFile(indexEntries);
   }
+}
+
+export async function saveProjectSummaryResult(input: {
+  key: string;
+  summary: string;
+  sentences: SummarySentence[];
+  updatedAt: string;
+}): Promise<void> {
+  const { key, summary, sentences, updatedAt } = input;
+  const project = await getProjectByKey(key);
+  if (!project || !project.sourcePath) {
+    throw new Error("プロジェクトが見つからないため要約を保存できません。");
+  }
+
+  const entrySummaries = buildEntrySummaryMap(sentences, project.entries);
+  const updatedEntries = project.entries.map((entry) => {
+    const nextSummary = entrySummaries.get(entry.id);
+    return {
+      ...entry,
+      summary: nextSummary ?? entry.summary
+    };
+  });
+
+  const payload = {
+    summary,
+    summary_sentences: serializeSummarySentences(sentences),
+    summary_updated_at: updatedAt,
+    entries: serializeEntryRecords(updatedEntries),
+    full_text: project.fullText
+  };
+
+  await fs.mkdir(path.dirname(project.sourcePath), { recursive: true });
+  await fs.writeFile(project.sourcePath, JSON.stringify(payload, null, 2), "utf-8");
 }
 
 async function removeDirectorySafe(targetPath: string) {
@@ -180,6 +226,8 @@ export async function registerNewProject(input: {
   const { key, title, summary, panelPath, characterPath, entries, fullText, characters } = input;
   const payload = {
     summary,
+    summary_sentences: [],
+    summary_updated_at: new Date().toISOString(),
     entries,
     full_text: fullText
   };
@@ -200,41 +248,52 @@ export async function registerNewProject(input: {
   await writeIndexFile(filtered);
 }
 
-export async function overwriteProjectData(input: {
-  key: string;
-  summary: string;
-  entries: unknown[];
-  fullText: string;
-  characters: unknown[];
-  title?: string;
-}): Promise<void> {
-  const { key, summary, entries, fullText, characters, title } = input;
-  if (SAMPLE_PROJECT_KEYS.has(key)) {
-    throw new Error("サンプルプロジェクトは編集できません。");
-  }
+const ENTRY_SUMMARY_LIMIT = 280;
 
-  const definitions = await listProjectDefinitions();
-  const target = definitions.find((item) => item.key === key);
-  if (!target) {
-    throw new Error("プロジェクト定義が見つかりません。");
-  }
-
-  const payload = {
-    summary,
-    entries,
-    full_text: fullText
-  };
-
-  await fs.mkdir(path.dirname(target.panelFile), { recursive: true });
-  await fs.writeFile(target.panelFile, JSON.stringify(payload, null, 2), "utf-8");
-  await fs.writeFile(target.characterFile, JSON.stringify(characters, null, 2), "utf-8");
-
-  if (title) {
-    const indexEntries = await readIndexFile();
-    const found = indexEntries.find((entry) => entry.key === key);
-    if (found) {
-      found.title = title;
-      await writeIndexFile(indexEntries);
+function buildEntrySummaryMap(
+  sentences: SummarySentence[],
+  entries: EntryRecord[]
+): Map<number, string> {
+  const validEntryIds = new Set(entries.map((entry) => entry.id));
+  const collected = new Map<number, string[]>();
+  for (const sentence of sentences) {
+    const text = sentence.text.trim();
+    if (!text) {
+      continue;
+    }
+    for (const citation of sentence.citations ?? []) {
+      if (!Number.isInteger(citation) || !validEntryIds.has(citation)) {
+        continue;
+      }
+      const list = collected.get(citation) ?? [];
+      list.push(text);
+      collected.set(citation, list);
     }
   }
+
+  const result = new Map<number, string>();
+  for (const [entryId, fragments] of collected) {
+    const unique = Array.from(
+      new Set(
+        fragments
+          .map((fragment) => fragment.trim())
+          .filter((fragment) => fragment.length > 0)
+      )
+    );
+    if (!unique.length) {
+      continue;
+    }
+    const combined = unique.join(" / ");
+    result.set(entryId, truncateSummary(combined, ENTRY_SUMMARY_LIMIT));
+  }
+
+  // Ensure entries without collected fragments are not present to preserve existing summaries.
+  return result;
+}
+
+function truncateSummary(text: string, limit: number): string {
+  if (text.length <= limit) {
+    return text;
+  }
+  return `${text.slice(0, limit)}…`;
 }

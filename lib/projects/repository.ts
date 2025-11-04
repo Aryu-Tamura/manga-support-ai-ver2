@@ -9,7 +9,9 @@ import {
   ProjectDefinition,
   ProjectDefinitionSchema,
   ProjectSummary,
-  SourceSpan
+  SourceSpan,
+  SummarySentence,
+  SummarySentenceSchema
 } from "./types";
 
 const DATA_ROOT = path.join(process.cwd(), "Streamlit", "data");
@@ -54,6 +56,7 @@ const RawEntrySchema = z
 const RawPanelFileSchema = z
   .object({
     summary: z.string().optional(),
+    summary_sentences: z.array(z.unknown()).optional(),
     entries: z.array(RawEntrySchema).optional(),
     full_text: z.string().optional()
   })
@@ -282,17 +285,59 @@ export async function getProjectByKey(key: string): Promise<ProjectData | null> 
   }
 
   const entries = (panel.entries ?? []).map(normaliseEntry);
+  const summarySentences = normalizeSummarySentences(panel.summary_sentences);
+  const summaryUpdatedAt = typeof panel.summary_updated_at === "string" ? panel.summary_updated_at : "";
   const characters = await loadCharacterFile(definition.characterFile);
 
   const project = ProjectDataSchema.parse({
     key: definition.key,
     title: definition.title,
     summary: panel.summary ?? "",
+    summarySentences,
     entries,
     characters,
     fullText: panel.full_text ?? "",
+    summaryUpdatedAt,
     sourcePath: definition.panelFile
   });
 
   return project;
+}
+
+function normalizeSummarySentences(value: unknown): SummarySentence[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const result: SummarySentence[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const record = item as Record<string, unknown>;
+    const text = typeof record.text === "string" ? record.text : "";
+    const rawCitations = Array.isArray(record.citations) ? record.citations : [];
+    const citations = rawCitations
+      .map((citation) => {
+        if (typeof citation === "number") {
+          return citation;
+        }
+        if (typeof citation === "string") {
+          const trimmed = citation.trim();
+          const parsed = Number.parseInt(trimmed, 10);
+          if (Number.isInteger(parsed)) {
+            return parsed;
+          }
+        }
+        return null;
+      })
+      .filter((value): value is number => typeof value === "number" && Number.isInteger(value));
+    const parsed = SummarySentenceSchema.safeParse({
+      text,
+      citations
+    });
+    if (parsed.success) {
+      result.push(parsed.data);
+    }
+  }
+  return result;
 }

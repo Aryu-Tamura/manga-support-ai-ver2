@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { SummaryClient } from "@/components/summary/summary-client";
 import { SUMMARY_GRAIN_OPTIONS } from "@/lib/config/summary";
 import { getProjectByKey } from "@/lib/projects/repository";
+import { SummaryPreview } from "@/components/summary/summary-preview";
 
 type SummaryPageProps = {
   params: {
@@ -30,25 +31,16 @@ export default async function ProjectSummaryPage({ params }: SummaryPageProps) {
           shadcn/ui + Tailwind に最適化した UI を提供します。
         </p>
       </header>
-      <div className="grid grid-cols-1 gap-6 rounded-lg border border-border bg-card p-6 shadow-sm md:grid-cols-3">
-        <div>
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">チャンク数</p>
-          <p className="mt-1 text-2xl font-semibold">{project.entries.length}</p>
-        </div>
-        <div className="md:col-span-2">
-          <p className="text-xs uppercase tracking-wide text-muted-foreground">要約（抜粋）</p>
-          <p className="mt-2 text-sm leading-relaxed text-foreground">
-            {project.summary || "要約がまだ登録されていません。"}
-          </p>
-        </div>
-      </div>
       <SummaryClient
         projectKey={project.key}
         projectTitle={project.title}
         chunkCount={project.entries.length}
         entries={entries}
         grainOptions={SUMMARY_GRAIN_OPTIONS}
+        sourcePanelContainerId="summary-source-panel-root"
       />
+      <SummaryPreview project={project} />
+      <div id="summary-source-panel-root" />
     </section>
   );
 }

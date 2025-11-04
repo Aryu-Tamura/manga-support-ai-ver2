@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState, useTransition } from "react";
+import { useMemo, useState, useTransition } from "react";
+import type { DragEvent } from "react";
 import {
   generateSummaryVariationsAction,
   generateReconstructedSummaryAction
@@ -15,17 +16,13 @@ import {
   defaultRange,
   type ValidationBlock
 } from "@/lib/validation/utils";
+import type { EntryRecord, SummarySentence } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
-
-type ValidationEntry = {
-  id: number;
-  summary: string;
-  text: string;
-};
 
 type ValidationClientProps = {
   projectKey: string;
-  entries: ValidationEntry[];
+  entries: EntryRecord[];
+  sentences: SummarySentence[];
 };
 
 type VariationsState =
@@ -42,21 +39,22 @@ type ReconstructionState =
     }
   | null;
 
-export function ValidationClient({ projectKey, entries }: ValidationClientProps) {
+export function ValidationClient({ projectKey, entries, sentences }: ValidationClientProps) {
+  const entryMap = useMemo(() => {
+    const map = new Map<number, EntryRecord>();
+    entries.forEach((entry) => {
+      map.set(entry.id, entry);
+    });
+    return map;
+  }, [entries]);
+
   const initialRange = useMemo(() => defaultRange(entries), [entries]);
   const [rangeStart, setRangeStart] = useState(initialRange.start);
   const [rangeEnd, setRangeEnd] = useState(initialRange.end);
-  const initialBlocks = useMemo(
-    () => buildInitialBlocks(entries, initialRange.start, initialRange.end),
-    [entries, initialRange.start, initialRange.end]
+  const [blocks, setBlocks] = useState<ValidationBlock[]>(() =>
+    buildInitialBlocks(sentences, entries, initialRange.start, initialRange.end)
   );
-  const HISTORY_LIMIT = 50;
-  const [history, setHistory] = useState(() => ({
-    past: [] as ValidationBlock[][],
-    present: initialBlocks,
-    future: [] as ValidationBlock[][]
-  }));
-  const [selectedId, setSelectedId] = useState<number | null>(initialBlocks[0]?.entryId ?? null);
+  const [selectedBlockId, setSelectedBlockId] = useState<string | null>(blocks[0]?.blockId ?? null);
   const [variationsState, setVariationsState] = useState<VariationsState>(null);
   const [reconstructionState, setReconstructionState] = useState<ReconstructionState>(null);
   const [variationPrompt, setVariationPrompt] = useState("読みやすくする");
@@ -67,113 +65,174 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
   const [isApplyingRange, startApplyRange] = useTransition();
   const [isGeneratingVariations, startGenerateVariations] = useTransition();
   const [isReconstructing, startReconstruct] = useTransition();
-
-  const blocks = history.present;
-
-  useEffect(() => {
-    if (selectedId === null && blocks.length) {
-      setSelectedId(blocks[0].entryId);
-    }
-  }, [blocks, selectedId]);
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [dragOverId, setDragOverId] = useState<string | "start" | "end" | null>(null);
 
   const selectedBlock = useMemo(
-    () => blocks.find((block) => block.entryId === selectedId) ?? null,
-    [blocks, selectedId]
+    () => blocks.find((block) => block.blockId === selectedBlockId) ?? null,
+    [blocks, selectedBlockId]
   );
 
   const selectedContext = useMemo(() => {
     if (!selectedBlock) {
       return [];
     }
-    return [
-      {
-        id: selectedBlock.entryId,
-        text: selectedBlock.text,
-        summary: selectedBlock.summary
+    const contexts = selectedBlock.citations
+      .map((citation) => entryMap.get(citation))
+      .filter((entry): entry is EntryRecord => Boolean(entry))
+      .map((entry) => ({
+        id: entry.id,
+        text: entry.text,
+        summary: entry.summary ?? ""
+      }));
+    if (contexts.length > 0) {
+      return contexts;
+    }
+    if (selectedBlock.entryId > 0) {
+      const entry = entryMap.get(selectedBlock.entryId);
+      if (entry) {
+        return [
+          {
+            id: entry.id,
+            text: entry.text,
+            summary: entry.summary ?? ""
+          }
+        ];
       }
-    ];
-  }, [selectedBlock]);
-
-  const pushHistory = (nextBlocks: ValidationBlock[]) => {
-    setHistory((prev) => ({
-      past: [...prev.past, prev.present].slice(-HISTORY_LIMIT),
-      present: nextBlocks,
-      future: []
-    }));
-  };
-
-  const handleUndo = () => {
-    setHistory((prev) => {
-      if (!prev.past.length) return prev;
-      const previous = prev.past[prev.past.length - 1];
-      const newPast = prev.past.slice(0, -1);
-      return {
-        past: newPast,
-        present: previous,
-        future: [prev.present, ...prev.future].slice(0, HISTORY_LIMIT)
-      };
-    });
-  };
-
-  const handleRedo = () => {
-    setHistory((prev) => {
-      if (!prev.future.length) return prev;
-      const [next, ...rest] = prev.future;
-      return {
-        past: [...prev.past, prev.present].slice(-HISTORY_LIMIT),
-        present: next,
-        future: rest
-      };
-    });
-  };
-
-  const canUndo = history.past.length > 0;
-  const canRedo = history.future.length > 0;
+    }
+    return [];
+  }, [entryMap, selectedBlock]);
 
   const handleApplyRange = () => {
     setRangeMessage(null);
     startApplyRange(() => {
-      const start = Math.max(1, Math.min(rangeStart, entries[entries.length - 1]?.id ?? 1));
-      const end = Math.max(start, Math.min(rangeEnd, entries[entries.length - 1]?.id ?? start));
-      const nextBlocks = buildInitialBlocks(entries, start, end);
+      const lastEntryId = entries[entries.length - 1]?.id ?? 1;
+      const start = Math.max(1, Math.min(rangeStart, lastEntryId));
+      const end = Math.max(start, Math.min(rangeEnd, lastEntryId));
+      const nextBlocks = buildInitialBlocks(sentences, entries, start, end);
       if (nextBlocks.length === 0) {
         setRangeMessage("指定範囲に要約ブロックがありません。");
         return;
       }
-      pushHistory(nextBlocks);
-      setSelectedId(nextBlocks[0].entryId);
+      setBlocks(nextBlocks);
+      setSelectedBlockId(nextBlocks[0]?.blockId ?? null);
       setVariationsState(null);
       setReconstructionState(null);
       setRangeMessage(`チャンク ${start}〜${end} をロードしました。`);
     });
   };
 
-  const handleSummaryChange = (entryId: number, summary: string) => {
-    const nextBlocks = blocks.map((block) =>
-      block.entryId === entryId
-        ? {
-            ...block,
-            summary
-          }
-        : block
+  const handleSummaryChange = (blockId: string, summary: string) => {
+    setBlocks((prev) =>
+      prev.map((block) =>
+        block.blockId === blockId
+          ? {
+              ...block,
+              summary
+            }
+          : block
+      )
     );
-    pushHistory(nextBlocks);
   };
 
-  const handleMoveBlock = (entryId: number, direction: "up" | "down") => {
-    const index = blocks.findIndex((block) => block.entryId === entryId);
-    if (index === -1) return;
-    const target = direction === "up" ? index - 1 : index + 1;
-    if (target < 0 || target >= blocks.length) return;
-    const next = [...blocks];
-    const [current] = next.splice(index, 1);
-    next.splice(target, 0, current);
-    pushHistory(
-      next.map((block, idx) => ({
+  const handleDragStart = (event: DragEvent<HTMLElement>, blockId: string) => {
+    event.dataTransfer.setData("text/plain", blockId);
+    event.dataTransfer.effectAllowed = "move";
+    setDraggingId(blockId);
+  };
+
+  const handleDragOver = (event: DragEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "move";
+  };
+
+  const handleDragEnter = (targetId: string) => {
+    if (!draggingId || draggingId === targetId) {
+      return;
+    }
+    setDragOverId(targetId);
+  };
+
+  const handleDragLeave = (targetId: string) => {
+    if (dragOverId === targetId) {
+      setDragOverId(null);
+    }
+  };
+
+  const handleDropZoneEnter = (zone: "start" | "end") => {
+    if (!draggingId) {
+      return;
+    }
+    setDragOverId(zone);
+  };
+
+  const handleDropZoneLeave = (zone: "start" | "end") => {
+    if (dragOverId === zone) {
+      setDragOverId(null);
+    }
+  };
+
+  const reorderBlocks = (movedId: string, updater: (list: ValidationBlock[], index: number) => ValidationBlock[]) => {
+    setBlocks((prev) => {
+      const currentIndex = prev.findIndex((block) => block.blockId === movedId);
+      if (currentIndex === -1) {
+        return prev;
+      }
+      const next = updater([...prev], currentIndex);
+      return next.map((block, idx) => ({
         ...block,
         order: idx + 1
-      }))
-    );
+      }));
+    });
+  };
+
+  const handleDropOnBlock = (targetBlockId: string) => {
+    if (!draggingId || draggingId === targetBlockId) {
+      return;
+    }
+    reorderBlocks(draggingId, (list, currentIndex) => {
+      const [moved] = list.splice(currentIndex, 1);
+      const targetIndex = list.findIndex((block) => block.blockId === targetBlockId);
+      if (targetIndex === -1) {
+        list.splice(currentIndex, 0, moved);
+        return list;
+      }
+      list.splice(targetIndex, 0, moved);
+      return list;
+    });
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
+  const handleDropAtStart = () => {
+    if (!draggingId) {
+      return;
+    }
+    reorderBlocks(draggingId, (list, currentIndex) => {
+      const [moved] = list.splice(currentIndex, 1);
+      list.unshift(moved);
+      return list;
+    });
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
+  const handleDropAtEnd = () => {
+    if (!draggingId) {
+      return;
+    }
+    reorderBlocks(draggingId, (list, currentIndex) => {
+      const [moved] = list.splice(currentIndex, 1);
+      list.push(moved);
+      return list;
+    });
+    setDraggingId(null);
+    setDragOverId(null);
+  };
+
+  const handleDragEnd = () => {
+    setDraggingId(null);
+    setDragOverId(null);
   };
 
   const handleGenerateVariations = () => {
@@ -190,7 +249,8 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
     startGenerateVariations(async () => {
       const response = await generateSummaryVariationsAction({
         summary: summaryText,
-        customPrompt: variationPrompt
+        customPrompt: variationPrompt,
+        citations: selectedBlock.citations
       });
       if (!response.ok) {
         setVariationMessage(response.message);
@@ -210,7 +270,7 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
 
   const handleApplyVariation = (variant: string) => {
     if (!selectedBlock) return;
-    handleSummaryChange(selectedBlock.entryId, variant);
+    handleSummaryChange(selectedBlock.blockId, variant);
     setVariationsState(null);
     setVariationMessage("要約ブロックを更新しました。");
   };
@@ -218,7 +278,8 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
   const handleReconstructSummary = () => {
     const payloadBlocks = blocks.map((block) => ({
       id: block.entryId,
-      summary: block.summary.trim()
+      summary: block.summary.trim(),
+      citations: block.citations
     }));
     if (!payloadBlocks.every((block) => block.summary.length > 0)) {
       setReconstructionMessage("空の要約が含まれています。全ての要約を確認してください。");
@@ -251,180 +312,248 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
     <div className="space-y-6">
       <section className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
         <header className="space-y-2">
-          <h3 className="text-lg font-semibold tracking-tight">要約ブロックの編集</h3>
+          <h3 className="text-lg font-semibold tracking-tight">作業範囲の設定</h3>
           <p className="text-sm text-muted-foreground">
-            チャンク範囲を指定し、各要約ブロックの順序と表現を調整します。
+            プレビューしたいチャンクの範囲を指定してから、要約ブロックの整理を行います。
           </p>
         </header>
-        <div className="flex items-center gap-2">
+        <div className="grid gap-4 md:grid-cols-[repeat(3,minmax(0,1fr))]">
+          <NumberField
+            id="validation-range-start"
+            label="開始チャンク"
+            value={rangeStart}
+            min={1}
+            max={entries[entries.length - 1]?.id ?? 1}
+            onChange={setRangeStart}
+          />
+          <NumberField
+            id="validation-range-end"
+            label="終了チャンク"
+            value={rangeEnd}
+            min={rangeStart}
+            max={entries[entries.length - 1]?.id ?? rangeStart}
+            onChange={setRangeEnd}
+          />
           <button
             type="button"
-            onClick={handleUndo}
-            disabled={!canUndo}
+            onClick={handleApplyRange}
+            disabled={isApplyingRange}
             className={cn(
-              "inline-flex items-center justify-center rounded-md border border-border px-3 py-1 text-sm",
-              canUndo ? "hover:bg-muted" : "cursor-not-allowed opacity-60"
+              "self-end rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
+              "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              isApplyingRange && "cursor-not-allowed opacity-60"
             )}
           >
-            Undo
-          </button>
-          <button
-            type="button"
-            onClick={handleRedo}
-            disabled={!canRedo}
-            className={cn(
-              "inline-flex items-center justify-center rounded-md border border-border px-3 py-1 text-sm",
-              canRedo ? "hover:bg-muted" : "cursor-not-allowed opacity-60"
-            )}
-          >
-            Redo
+            {isApplyingRange ? "読込中…" : "範囲を適用"}
           </button>
         </div>
-        <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
-          <div className="grid grid-cols-2 gap-4">
-            <NumberField
-              id="validation-start"
-              label="開始チャンク"
-              value={rangeStart}
-              onChange={setRangeStart}
-              min={1}
-              max={entries[entries.length - 1]?.id ?? 1}
-            />
-            <NumberField
-              id="validation-end"
-              label="終了チャンク"
-              value={rangeEnd}
-              onChange={setRangeEnd}
-              min={1}
-              max={entries[entries.length - 1]?.id ?? 1}
-            />
-          </div>
-          <div className="flex items-end">
-            <button
-              type="button"
-              className={cn(
-                "inline-flex w-full items-center justify-center rounded-md border border-border bg-background px-4 py-2 text-sm font-semibold transition",
-                "hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                isApplyingRange && "cursor-not-allowed opacity-60"
-              )}
-              onClick={handleApplyRange}
-              disabled={isApplyingRange}
-            >
-              {isApplyingRange ? "適用中…" : "範囲を適用"}
-            </button>
-          </div>
-          <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-            現在のブロック数: {blocks.length}（合計 {entries.length} チャンク）
-          </div>
+        <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
+          <span>読み込み済みブロック: {blocks.length}</span>
+          <span>総チャンク数: {entries.length}</span>
         </div>
-        {rangeMessage && <p className="text-sm text-muted-foreground">{rangeMessage}</p>}
+        {rangeMessage && (
+          <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm text-primary">
+            {rangeMessage}
+          </div>
+        )}
+      </section>
 
-        <div className="grid gap-6 lg:grid-cols-[minmax(0,0.6fr)_minmax(0,0.4fr)]">
-          <div className="space-y-3">
-            {blocks.map((block, index) => (
-              <article
-                key={block.entryId}
-                className={cn(
-                  "space-y-2 rounded-md border border-border px-4 py-3 transition",
-                  selectedId === block.entryId && "border-primary bg-primary/5 shadow-sm"
-                )}
-              >
-                <div className="flex items-center justify-between">
-                  <button
-                    type="button"
-                    className="text-left text-sm font-semibold text-foreground"
-                    onClick={() => setSelectedId(block.entryId)}
-                  >
-                    ブロック {index + 1}（ID {block.entryId}）
-                  </button>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted"
-                      onClick={() => handleMoveBlock(block.entryId, "up")}
-                    >
-                      ↑
-                    </button>
-                    <button
-                      type="button"
-                      className="rounded-md border border-border px-2 py-1 text-xs text-muted-foreground transition hover:bg-muted"
-                      onClick={() => handleMoveBlock(block.entryId, "down")}
-                    >
-                      ↓
-                    </button>
-                  </div>
+      <section className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-sm">
+        <header className="space-y-2">
+          <h3 className="text-lg font-semibold tracking-tight">要約ブロックの整理</h3>
+          <p className="text-sm text-muted-foreground">
+            ブロック一覧で並び順を調整し、右側で選択中の要約を編集・改善します。
+          </p>
+        </header>
+        <div className="grid gap-6 xl:grid-cols-[minmax(0,0.45fr)_minmax(0,0.55fr)]">
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <h4 className="text-sm font-semibold text-foreground">ブロック一覧</h4>
+              <span className="text-xs text-muted-foreground">{blocks.length} 件</span>
+            </div>
+            <div className="rounded-md border border-border bg-background">
+              {blocks.length === 0 ? (
+                <div className="px-4 py-12 text-center text-sm text-muted-foreground">
+                  範囲を適用すると要約ブロックが表示されます。
                 </div>
-                <textarea
-                  value={block.summary}
-                  onChange={(event) => handleSummaryChange(block.entryId, event.target.value)}
-                  rows={3}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                />
-              </article>
-            ))}
-            {blocks.length === 0 && (
-              <div className="rounded-md border border-dashed border-muted-foreground/40 p-4 text-sm text-muted-foreground">
-                範囲を適用すると要約ブロックが表示されます。
-              </div>
-            )}
-          </div>
-          <div className="space-y-4 rounded-md border border-border bg-background px-4 py-3">
-            <header className="space-y-1">
-              <h4 className="text-sm font-semibold text-foreground">バリエーション生成</h4>
-              <p className="text-xs text-muted-foreground">
-                選択中のブロックの表現違いを提案します。採用したい案をクリックすると置き換えられ
-                ます。
-              </p>
-            </header>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                目的
-              </span>
-              <textarea
-                value={variationPrompt}
-                onChange={(event) => setVariationPrompt(event.target.value)}
-                rows={3}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleGenerateVariations}
-              className={cn(
-                "inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
-                "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                isGeneratingVariations && "cursor-not-allowed opacity-60"
+              ) : (
+                <div className="max-h-[520px] space-y-2 overflow-y-auto p-3 pr-2">
+                  {draggingId && (
+                    <DropZone
+                      label="ここにドロップすると先頭へ移動します"
+                      isActive={dragOverId === "start"}
+                      onDragOver={handleDragOver}
+                      onDragEnter={() => handleDropZoneEnter("start")}
+                      onDragLeave={() => handleDropZoneLeave("start")}
+                      onDrop={handleDropAtStart}
+                    />
+                  )}
+                  {blocks.map((block) => {
+                    const isSelected = block.blockId === selectedBlockId;
+                    const isDragging = draggingId === block.blockId;
+                    const isTarget = dragOverId === block.blockId;
+                    return (
+                      <button
+                        key={block.blockId}
+                        type="button"
+                        draggable
+                        onDragStart={(event) => handleDragStart(event, block.blockId)}
+                        onDragOver={handleDragOver}
+                        onDrop={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          handleDropOnBlock(block.blockId);
+                        }}
+                        onDragEnter={() => handleDragEnter(block.blockId)}
+                        onDragLeave={() => handleDragLeave(block.blockId)}
+                        onDragEnd={handleDragEnd}
+                        onClick={() => setSelectedBlockId(block.blockId)}
+                        className={cn(
+                          "group flex w-full flex-col gap-2 rounded-md border border-border bg-background px-4 py-3 text-left transition",
+                          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                          isSelected && "border-primary bg-primary/5 shadow-sm ring-1 ring-primary/40",
+                          isDragging && "cursor-grabbing opacity-60",
+                          isTarget && "border-primary border-dashed bg-primary/10"
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              <span>順序 {block.order}</span>
+                              <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40" />
+                              <span>チャンク {block.entryId}</span>
+                            </div>
+                            <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                              {block.summary || "（要約が入力されていません）"}
+                            </p>
+                          </div>
+                          <span
+                            aria-hidden="true"
+                            className={cn(
+                              "select-none text-lg text-muted-foreground transition group-hover:text-foreground",
+                              isDragging && "text-primary"
+                            )}
+                          >
+                            ⋮⋮
+                          </span>
+                        </div>
+                        {block.citations.length > 0 && (
+                          <div className="flex flex-wrap gap-1 text-xs text-muted-foreground">
+                            {block.citations.map((citation) => (
+                              <span
+                                key={`${block.blockId}-${citation}`}
+                                className="rounded-full bg-muted px-2 py-0.5"
+                              >
+                                引用 {citation}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </button>
+                    );
+                  })}
+                  {draggingId && (
+                    <DropZone
+                      label="ここにドロップすると末尾へ移動します"
+                      isActive={dragOverId === "end"}
+                      onDragOver={handleDragOver}
+                      onDragEnter={() => handleDropZoneEnter("end")}
+                      onDragLeave={() => handleDropZoneLeave("end")}
+                      onDrop={handleDropAtEnd}
+                    />
+                  )}
+                </div>
               )}
-              disabled={isGeneratingVariations}
-            >
-              {isGeneratingVariations ? "生成中…" : "LLM案を生成"}
-            </button>
-            {variationMessage && (
-              <p className="text-xs text-muted-foreground">{variationMessage}</p>
-            )}
-            <div className="space-y-2">
-              {variationsState?.variations.map((variation, index) => (
-                <button
-                  key={`${variation.variant}-${index}`}
-                  type="button"
-                  onClick={() => handleApplyVariation(variation.variant)}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-left text-sm leading-relaxed text-foreground transition hover:border-primary hover:bg-primary/5"
-                >
-                  <p className="font-medium">{variation.note || `案 ${index + 1}`}</p>
-                  <p className="mt-1 text-muted-foreground">{variation.variant}</p>
-                </button>
-              ))}
-              {!variationsState && (
+            </div>
+          </div>
+          <div className="space-y-4">
+            <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
+              <header className="space-y-1">
+                <h4 className="text-sm font-semibold text-foreground">要約の編集</h4>
                 <p className="text-xs text-muted-foreground">
-                  生成した候補がここに表示されます。クリックすると要約が置き換わります。
+                  左の一覧で選択したブロックの要約を編集します。変更は即座に保存されます。
+                </p>
+              </header>
+              {selectedBlock ? (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>ブロック {selectedBlock.order}</span>
+                    <span>チャンク {selectedBlock.entryId}</span>
+                  </div>
+                  <textarea
+                    value={selectedBlock.summary}
+                    onChange={(event) => handleSummaryChange(selectedBlock.blockId, event.target.value)}
+                    rows={8}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>文字数 {selectedBlock.summary.length}</span>
+                    <span>引用 {selectedBlock.citations.join(", ") || "なし"}</span>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  左の一覧から編集したいブロックを選択してください。
                 </p>
               )}
             </div>
-            {variationsState?.mode === "sample" && (
-              <p className="text-xs text-muted-foreground">
-                OpenAI API キーが未接続のため、サンプル案を表示しています。
-              </p>
-            )}
+            <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
+              <header className="space-y-1">
+                <h4 className="text-sm font-semibold text-foreground">表現のバリエーション</h4>
+                <p className="text-xs text-muted-foreground">
+                  LLM案またはサンプル案を生成して、要約の表現を磨きます。
+                </p>
+              </header>
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  生成の目的
+                </span>
+                <textarea
+                  value={variationPrompt}
+                  onChange={(event) => setVariationPrompt(event.target.value)}
+                  rows={3}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                />
+              </label>
+              <button
+                type="button"
+                onClick={handleGenerateVariations}
+                disabled={isGeneratingVariations || !selectedBlock}
+                className={cn(
+                  "inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
+                  "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  (isGeneratingVariations || !selectedBlock) && "cursor-not-allowed opacity-60"
+                )}
+              >
+                {isGeneratingVariations ? "生成中…" : "LLM案を生成"}
+              </button>
+              {variationMessage && (
+                <p className="text-xs text-muted-foreground">{variationMessage}</p>
+              )}
+              <div className="space-y-2">
+                {variationsState?.variations.map((variation, index) => (
+                  <button
+                    key={`${variation.variant}-${index}`}
+                    type="button"
+                    onClick={() => handleApplyVariation(variation.variant)}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-left text-sm leading-relaxed text-foreground transition hover:border-primary hover:bg-primary/5"
+                  >
+                    <p className="font-medium">{variation.note || `案 ${index + 1}`}</p>
+                    <p className="mt-1 text-muted-foreground">{variation.variant}</p>
+                  </button>
+                ))}
+                {!variationsState && (
+                  <p className="text-xs text-muted-foreground">
+                    生成した候補がここに表示されます。クリックすると要約が置き換わります。
+                  </p>
+                )}
+              </div>
+              {variationsState?.mode === "sample" && (
+                <p className="text-xs text-muted-foreground">
+                  OpenAI API キーが未接続のため、サンプル案を表示しています。
+                </p>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -433,7 +562,7 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
         <header className="space-y-2">
           <h3 className="text-lg font-semibold tracking-tight">再構成要約</h3>
           <p className="text-sm text-muted-foreground">
-            並べ替えた要約ブロックを元に新しい要約案を生成します。
+            並べ替えた要約ブロックと引用情報を基に、新しい要約案を生成します。
           </p>
         </header>
         <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -456,26 +585,22 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
           <button
             type="button"
             onClick={handleReconstructSummary}
+            disabled={isReconstructing}
             className={cn(
               "inline-flex items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
               "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               isReconstructing && "cursor-not-allowed opacity-60"
             )}
-            disabled={isReconstructing}
           >
             {isReconstructing ? "生成中…" : "この順序で要約を生成"}
           </button>
         </div>
-        {reconstructionMessage && (
-          <p className="text-sm text-muted-foreground">{reconstructionMessage}</p>
-        )}
-        <div className="rounded-md border border-border/60 bg-background/80 p-4 text-sm leading-relaxed text-foreground min-h-[180px] whitespace-pre-wrap">
+        {reconstructionMessage && <p className="text-sm text-muted-foreground">{reconstructionMessage}</p>}
+        <div className="min-h-[180px] whitespace-pre-wrap rounded-md border border-border/60 bg-background/80 p-4 text-sm leading-relaxed text-foreground">
           {reconstructionState ? (
             reconstructionState.summary
           ) : (
-            <span className="text-muted-foreground">
-              生成した再構成要約がここに表示されます。
-            </span>
+            <span className="text-muted-foreground">生成した再構成要約がここに表示されます。</span>
           )}
         </div>
         {reconstructionState?.mode === "sample" && (
@@ -485,14 +610,18 @@ export function ValidationClient({ projectKey, entries }: ValidationClientProps)
         )}
       </section>
 
-      <section className="space-y-3">
-        <header>
-          <h3 className="text-sm font-semibold text-foreground">選択中ブロックの本文</h3>
-          <p className="text-xs text-muted-foreground">
-            原文の抜粋を参照しながら要約の表現を調整できます。
+      <section className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-sm">
+        <header className="space-y-1">
+          <h3 className="text-lg font-semibold text-foreground">原文コンテキスト</h3>
+          <p className="text-sm text-muted-foreground">
+            引用チャンクを確認しながら要約の表現を磨き込めます。
           </p>
         </header>
-        <SourcePanel entries={selectedContext} highlightedIds={[selectedBlock?.entryId ?? -1]} />
+        <SourcePanel
+          entries={selectedContext}
+          highlightedIds={selectedBlock?.citations ?? []}
+          activeId={selectedBlock?.citations[0] ?? null}
+        />
       </section>
     </div>
   );
@@ -502,12 +631,12 @@ type NumberFieldProps = {
   id: string;
   label: string;
   value: number;
-  onChange: (value: number) => void;
   min: number;
   max: number;
+  onChange: (value: number) => void;
 };
 
-function NumberField({ id, label, value, onChange, min, max }: NumberFieldProps) {
+function NumberField({ id, label, value, min, max, onChange }: NumberFieldProps) {
   return (
     <label htmlFor={id} className="flex flex-col gap-1">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -519,9 +648,43 @@ function NumberField({ id, label, value, onChange, min, max }: NumberFieldProps)
         value={value}
         min={min}
         max={max}
-        onChange={(event) => onChange(Number.parseInt(event.target.value, 10) || min)}
+        onChange={(event) => {
+          const parsed = Number.parseInt(event.target.value, 10);
+          const nextValue = Number.isNaN(parsed) ? min : parsed;
+          onChange(Math.max(min, Math.min(max, nextValue)));
+        }}
         className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
       />
     </label>
+  );
+}
+
+type DropZoneProps = {
+  label: string;
+  isActive: boolean;
+  onDrop: () => void;
+  onDragOver: (event: DragEvent<HTMLElement>) => void;
+  onDragEnter: () => void;
+  onDragLeave: () => void;
+};
+
+function DropZone({ label, isActive, onDrop, onDragOver, onDragEnter, onDragLeave }: DropZoneProps) {
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDrop={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onDrop();
+      }}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      className={cn(
+        "rounded-md border border-dashed border-muted-foreground/60 px-4 py-3 text-center text-xs text-muted-foreground transition",
+        isActive && "border-primary text-primary"
+      )}
+    >
+      {label}
+    </div>
   );
 }

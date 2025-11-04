@@ -9,7 +9,8 @@ import {
 
 const VariationSchema = z.object({
   summary: z.string().min(1),
-  customPrompt: z.string().optional().default("")
+  customPrompt: z.string().optional().default(""),
+  citations: z.array(z.number().int()).optional().default([])
 });
 
 export type VariationActionResponse =
@@ -44,7 +45,8 @@ const ReconSchema = z.object({
     .array(
       z.object({
         id: z.number().int(),
-        summary: z.string().min(1)
+        summary: z.string().min(1),
+        citations: z.array(z.number().int()).optional().default([])
       })
     )
     .min(1),

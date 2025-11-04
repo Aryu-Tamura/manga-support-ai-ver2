@@ -2,7 +2,9 @@
 
 import { z } from "zod";
 import { getProjectByKey } from "@/lib/projects/repository";
+import { saveProjectSummaryResult } from "@/lib/projects/persistence";
 import { generateSummary } from "@/lib/summary/service";
+import type { SummarySentence } from "@/lib/projects/types";
 
 const SummaryActionSchema = z.object({
   projectKey: z.string().min(1),
@@ -16,6 +18,7 @@ export type SummaryActionInput = z.infer<typeof SummaryActionSchema>;
 export type SummaryActionSuccess = {
   ok: true;
   summary: string;
+  sentences: SummarySentence[];
   citations: number[];
   mode: "llm" | "sample";
 };
@@ -60,9 +63,21 @@ export async function generateSummaryAction(
     grain
   });
 
+  try {
+    await saveProjectSummaryResult({
+      key: project.key,
+      summary: result.summary,
+      sentences: result.sentences,
+      updatedAt: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error("要約結果の保存に失敗しました:", error);
+  }
+
   return {
     ok: true,
     summary: result.summary,
+    sentences: result.sentences,
     citations: result.citations,
     mode: result.mode
   };
