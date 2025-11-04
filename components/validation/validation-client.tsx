@@ -18,6 +18,7 @@ import {
 } from "@/lib/validation/utils";
 import type { EntryRecord, SummarySentence } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
+import { BookOpen, Edit3 } from "lucide-react";
 
 type ValidationClientProps = {
   projectKey: string;
@@ -62,6 +63,7 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
   const [rangeMessage, setRangeMessage] = useState<string | null>(null);
   const [variationMessage, setVariationMessage] = useState<string | null>(null);
   const [reconstructionMessage, setReconstructionMessage] = useState<string | null>(null);
+  const [detailView, setDetailView] = useState<"edit" | "source">("edit");
   const [isApplyingRange, startApplyRange] = useTransition();
   const [isGeneratingVariations, startGenerateVariations] = useTransition();
   const [isReconstructing, startReconstruct] = useTransition();
@@ -308,6 +310,8 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
     });
   };
 
+  const isEditView = detailView === "edit";
+
   return (
     <div className="space-y-6">
       <section className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
@@ -415,18 +419,18 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
                           isDragging && "cursor-grabbing opacity-60",
                           isTarget && "border-primary border-dashed bg-primary/10"
                         )}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="space-y-1">
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <span>順序 {block.order}</span>
-                              <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40" />
-                              <span>チャンク {block.entryId}</span>
+                        >
+                          <div className="flex items-start justify-between gap-3">
+                            <div className="space-y-1">
+                              <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                                <span>順序 {block.order}</span>
+                                <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40" />
+                                <span>元チャンク番号 {block.entryId}</span>
+                              </div>
+                              <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
+                                {block.summary || "（要約が入力されていません）"}
+                              </p>
                             </div>
-                            <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
-                              {block.summary || "（要約が入力されていません）"}
-                            </p>
-                          </div>
                           <span
                             aria-hidden="true"
                             className={cn(
@@ -467,93 +471,142 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
             </div>
           </div>
           <div className="space-y-4">
-            <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
-              <header className="space-y-1">
-                <h4 className="text-sm font-semibold text-foreground">要約の編集</h4>
-                <p className="text-xs text-muted-foreground">
-                  左の一覧で選択したブロックの要約を編集します。変更は即座に保存されます。
-                </p>
-              </header>
-              {selectedBlock ? (
-                <>
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span>ブロック {selectedBlock.order}</span>
-                    <span>チャンク {selectedBlock.entryId}</span>
-                  </div>
-                  <textarea
-                    value={selectedBlock.summary}
-                    onChange={(event) => handleSummaryChange(selectedBlock.blockId, event.target.value)}
-                    rows={8}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                  />
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                    <span>文字数 {selectedBlock.summary.length}</span>
-                    <span>引用 {selectedBlock.citations.join(", ") || "なし"}</span>
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  左の一覧から編集したいブロックを選択してください。
-                </p>
-              )}
-            </div>
-            <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
-              <header className="space-y-1">
-                <h4 className="text-sm font-semibold text-foreground">表現のバリエーション</h4>
-                <p className="text-xs text-muted-foreground">
-                  LLM案またはサンプル案を生成して、要約の表現を磨きます。
-                </p>
-              </header>
-              <label className="flex flex-col gap-2">
-                <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  生成の目的
-                </span>
-                <textarea
-                  value={variationPrompt}
-                  onChange={(event) => setVariationPrompt(event.target.value)}
-                  rows={3}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                />
-              </label>
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                onClick={handleGenerateVariations}
-                disabled={isGeneratingVariations || !selectedBlock}
+                onClick={() => setDetailView("edit")}
+                aria-pressed={isEditView}
                 className={cn(
-                  "inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
-                  "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-                  (isGeneratingVariations || !selectedBlock) && "cursor-not-allowed opacity-60"
+                  "inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition",
+                  isEditView
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
                 )}
               >
-                {isGeneratingVariations ? "生成中…" : "LLM案を生成"}
+                <Edit3 className="h-4 w-4" aria-hidden="true" />
+                <span>要約編集</span>
               </button>
-              {variationMessage && (
-                <p className="text-xs text-muted-foreground">{variationMessage}</p>
-              )}
-              <div className="space-y-2">
-                {variationsState?.variations.map((variation, index) => (
-                  <button
-                    key={`${variation.variant}-${index}`}
-                    type="button"
-                    onClick={() => handleApplyVariation(variation.variant)}
-                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-left text-sm leading-relaxed text-foreground transition hover:border-primary hover:bg-primary/5"
-                  >
-                    <p className="font-medium">{variation.note || `案 ${index + 1}`}</p>
-                    <p className="mt-1 text-muted-foreground">{variation.variant}</p>
-                  </button>
-                ))}
-                {!variationsState && (
-                  <p className="text-xs text-muted-foreground">
-                    生成した候補がここに表示されます。クリックすると要約が置き換わります。
-                  </p>
+              <button
+                type="button"
+                onClick={() => setDetailView("source")}
+                aria-pressed={!isEditView}
+                className={cn(
+                  "inline-flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition",
+                  !isEditView
+                    ? "bg-primary text-primary-foreground shadow-sm"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
                 )}
-              </div>
-              {variationsState?.mode === "sample" && (
-                <p className="text-xs text-muted-foreground">
-                  OpenAI API キーが未接続のため、サンプル案を表示しています。
-                </p>
-              )}
+              >
+                <BookOpen className="h-4 w-4" aria-hidden="true" />
+                <span>原文チェック</span>
+              </button>
             </div>
+
+            {isEditView ? (
+              <>
+                <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
+                  <header className="space-y-1">
+                    <h4 className="text-sm font-semibold text-foreground">要約の編集</h4>
+                    <p className="text-xs text-muted-foreground">
+                      左の一覧で選択したブロックの要約を編集します。変更は即座に保存されます。
+                    </p>
+                  </header>
+                  {selectedBlock ? (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>順序 {selectedBlock.order}</span>
+                        <span>元チャンク番号 {selectedBlock.entryId}</span>
+                      </div>
+                      <textarea
+                        value={selectedBlock.summary}
+                        onChange={(event) => handleSummaryChange(selectedBlock.blockId, event.target.value)}
+                        rows={8}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                      />
+                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span>文字数 {selectedBlock.summary.length}</span>
+                        <span>引用 {selectedBlock.citations.join(", ") || "なし"}</span>
+                      </div>
+                    </>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      左の一覧から編集したいブロックを選択してください。
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
+                  <header className="space-y-1">
+                    <h4 className="text-sm font-semibold text-foreground">表現のバリエーション</h4>
+                    <p className="text-xs text-muted-foreground">
+                      LLM案またはサンプル案を生成して、要約の表現を磨きます。
+                    </p>
+                  </header>
+                  <label className="flex flex-col gap-2">
+                    <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      生成の目的
+                    </span>
+                    <textarea
+                      value={variationPrompt}
+                      onChange={(event) => setVariationPrompt(event.target.value)}
+                      rows={3}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    />
+                  </label>
+                  <button
+                    type="button"
+                    onClick={handleGenerateVariations}
+                    disabled={isGeneratingVariations || !selectedBlock}
+                    className={cn(
+                      "inline-flex w-full items-center justify-center rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
+                      "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      (isGeneratingVariations || !selectedBlock) && "cursor-not-allowed opacity-60"
+                    )}
+                  >
+                    {isGeneratingVariations ? "生成中…" : "LLM案を生成"}
+                  </button>
+                  {variationMessage && (
+                    <p className="text-xs text-muted-foreground">{variationMessage}</p>
+                  )}
+                  <div className="space-y-2">
+                    {variationsState?.variations.map((variation, index) => (
+                      <button
+                        key={`${variation.variant}-${index}`}
+                        type="button"
+                        onClick={() => handleApplyVariation(variation.variant)}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-left text-sm leading-relaxed text-foreground transition hover:border-primary hover:bg-primary/5"
+                      >
+                        <p className="font-medium">{variation.note || `案 ${index + 1}`}</p>
+                        <p className="mt-1 text-muted-foreground">{variation.variant}</p>
+                      </button>
+                    ))}
+                    {!variationsState && (
+                      <p className="text-xs text-muted-foreground">
+                        生成した候補がここに表示されます。クリックすると要約が置き換わります。
+                      </p>
+                    )}
+                  </div>
+                  {variationsState?.mode === "sample" && (
+                    <p className="text-xs text-muted-foreground">
+                      OpenAI API キーが未接続のため、サンプル案を表示しています。
+                    </p>
+                  )}
+                </div>
+              </>
+            ) : (
+              <div className="space-y-3 rounded-md border border-border bg-background px-4 py-4">
+                <header className="space-y-1">
+                  <h4 className="text-sm font-semibold text-foreground">原文チェック</h4>
+                  <p className="text-xs text-muted-foreground">
+                    選択中のブロックに紐づく原文チャンクを確認できます。
+                  </p>
+                </header>
+                <SourcePanel
+                  entries={selectedContext}
+                  highlightedIds={selectedBlock?.citations ?? []}
+                  activeId={selectedBlock?.citations[0] ?? null}
+                />
+              </div>
+            )}
           </div>
         </div>
       </section>
@@ -610,19 +663,6 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
         )}
       </section>
 
-      <section className="space-y-3 rounded-lg border border-border bg-card p-6 shadow-sm">
-        <header className="space-y-1">
-          <h3 className="text-lg font-semibold text-foreground">原文コンテキスト</h3>
-          <p className="text-sm text-muted-foreground">
-            引用チャンクを確認しながら要約の表現を磨き込めます。
-          </p>
-        </header>
-        <SourcePanel
-          entries={selectedContext}
-          highlightedIds={selectedBlock?.citations ?? []}
-          activeId={selectedBlock?.citations[0] ?? null}
-        />
-      </section>
     </div>
   );
 }
