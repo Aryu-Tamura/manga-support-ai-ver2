@@ -10,6 +10,11 @@ export type ValidationBlock = {
   text: string;
 };
 
+type InternalBlock = ValidationBlock & {
+  anchor: number;
+  sequence: number;
+};
+
 export function buildInitialBlocks(
   sentences: SummarySentence[],
   entries: EntryRecord[],
@@ -17,13 +22,13 @@ export function buildInitialBlocks(
   end: number
 ): ValidationBlock[] {
   const entryMap = new Map(entries.map((entry) => [entry.id, entry]));
+  const rangeEntries = entries.filter((entry) => entry.id >= start && entry.id <= end);
   const filteredSentences = sentences.filter((sentence) =>
     sentence.citations.some((id) => id >= start && id <= end && entryMap.has(id))
   );
 
   if (filteredSentences.length === 0) {
-    const selected = entries.filter((entry) => entry.id >= start && entry.id <= end);
-    return selected.map((entry, index) => ({
+    return rangeEntries.map((entry, index) => ({
       blockId: `entry-${entry.id}`,
       entryId: entry.id,
       order: index + 1,
@@ -33,24 +38,68 @@ export function buildInitialBlocks(
     }));
   }
 
-  return filteredSentences
+  const sentenceBlocks: InternalBlock[] = filteredSentences
     .map((sentence, index) => {
       const citations = sentence.citations.filter((id) => entryMap.has(id));
       if (citations.length === 0) {
         return null;
       }
-      const primary = citations[0];
+      const inRangeAnchors = citations.filter((id) => id >= start && id <= end);
+      const primary = inRangeAnchors.length > 0 ? inRangeAnchors[0] : citations[0];
       const entry = entryMap.get(primary);
+      const anchor = inRangeAnchors.length > 0 ? Math.min(...inRangeAnchors) : primary;
+
       return {
         blockId: `sentence-${index + 1}-${primary}`,
         entryId: primary,
         order: index + 1,
         summary: sentence.text,
         citations,
-        text: entry?.text ?? ""
+        text: entry?.text ?? "",
+        anchor,
+        sequence: index
       };
     })
-    .filter((block): block is ValidationBlock => block !== null);
+    .filter((block): block is InternalBlock => block !== null);
+
+  const coveredEntryIds = new Set<number>();
+  sentenceBlocks.forEach((block) => {
+    coveredEntryIds.add(block.entryId);
+    block.citations.forEach((citation) => {
+      if (citation >= start && citation <= end) {
+        coveredEntryIds.add(citation);
+      }
+    });
+  });
+
+  const fallbackBlocks: InternalBlock[] = rangeEntries
+    .filter((entry) => !coveredEntryIds.has(entry.id))
+    .map((entry, index) => ({
+      blockId: `entry-${entry.id}`,
+      entryId: entry.id,
+      order: 0,
+      summary: entry.summary?.trim() || entry.text.trim(),
+      citations: [entry.id],
+      text: entry.text,
+      anchor: entry.id,
+      sequence: sentenceBlocks.length + index
+    }));
+
+  return [...sentenceBlocks, ...fallbackBlocks]
+    .sort((a, b) => {
+      if (a.anchor === b.anchor) {
+        return a.sequence - b.sequence;
+      }
+      return a.anchor - b.anchor;
+    })
+    .map((block, index) => ({
+      blockId: block.blockId,
+      entryId: block.entryId,
+      order: index + 1,
+      summary: block.summary,
+      citations: block.citations,
+      text: block.text
+    }));
 }
 
 export function defaultRange(entries: EntryRecord[]) {
