@@ -113,10 +113,8 @@ export function PictureBookClient({
 
   useEffect(() => {
     if (!selectedPage) {
-      setCitationText("");
       setDialogueText("");
       setNarrationDraft("");
-      setActiveCitation(null);
       return;
     }
     setDialogueText(selectedPage.dialogues.join("\n"));
