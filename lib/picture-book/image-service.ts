@@ -288,9 +288,22 @@ function extractFileUri(payload: unknown): { fileUri?: string; mimeType?: string
         (part as GeminiInlineData).fileData ||
         (part as GeminiInlineData).file_data;
       if (fileData && typeof fileData === "object") {
+        const record = fileData as Record<string, unknown>;
+        const fileUri =
+          typeof record.fileUri === "string"
+            ? record.fileUri
+            : typeof record.file_uri === "string"
+              ? record.file_uri
+              : undefined;
+        const mimeType =
+          typeof record.mimeType === "string"
+            ? record.mimeType
+            : typeof record.mime_type === "string"
+              ? record.mime_type
+              : undefined;
         return {
-          fileUri: fileData.fileUri ?? (fileData as Record<string, unknown>).file_uri,
-          mimeType: fileData.mimeType ?? (fileData as Record<string, unknown>).mime_type
+          fileUri,
+          mimeType
         };
       }
     }
