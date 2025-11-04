@@ -1,26 +1,20 @@
 "use client";
 
 import Image from "next/image";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useTransition
-} from "react";
-import { ChevronDown, ChevronUp, FileDown, Link, RefreshCw, X } from "lucide-react";
-import { generatePictureBookImageAction } from "@/app/(dashboard)/projects/[projectKey]/picture-book/actions";
-import { CitationList } from "@/components/shared/citation-list";
-import { SourcePanel } from "@/components/summary/source-panel";
+  generatePictureBookDraftAction,
+  generatePictureBookImageAction
+} from "@/app/(dashboard)/projects/[projectKey]/picture-book/actions";
 import {
+  DEFAULT_PICTURE_BOOK_PAGE_COUNT,
   PICTURE_BOOK_PAGE_OPTIONS,
-  PICTURE_BOOK_PHASES,
   buildInitialPictureBookPages,
-  normaliseCitations,
+  buildImagePrompt,
+  clampCharacters,
   updatePageOrder,
-  type PictureBookPage,
-  type PictureBookPhase
+  type PictureBookPage
 } from "@/lib/picture-book/utils";
 import type { EntryRecord, SummarySentence } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
@@ -30,6 +24,8 @@ type PictureBookClientProps = {
   projectTitle: string;
   entries: EntryRecord[];
   sentences: SummarySentence[];
+  initialPages?: PictureBookPage[] | null;
+  initialSource?: "llm" | "fallback";
 };
 
 type SubTab = "editor" | "created";
@@ -38,41 +34,67 @@ export function PictureBookClient({
   projectKey,
   projectTitle,
   entries,
-  sentences
+  sentences,
+  initialPages,
+  initialSource
 }: PictureBookClientProps) {
-  const defaultPageCount = PICTURE_BOOK_PAGE_OPTIONS[1] ?? 12;
-  const [pageCount, setPageCount] = useState<number>(defaultPageCount);
-  const pageCountRef = useRef<number>(defaultPageCount);
-  const [pages, setPages] = useState<PictureBookPage[]>(() =>
-    buildInitialPictureBookPages(sentences, entries, defaultPageCount)
-  );
+  const defaultPageCount = DEFAULT_PICTURE_BOOK_PAGE_COUNT;
+  const initialPageList =
+    initialPages && initialPages.length > 0
+      ? initialPages
+      : buildInitialPictureBookPages(sentences, entries, defaultPageCount);
+  const [pageCount, setPageCount] = useState<number>(initialPageList.length || defaultPageCount);
+  const pageCountRef = useRef<number>(initialPageList.length || defaultPageCount);
+  const [pages, setPages] = useState<PictureBookPage[]>(initialPageList);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(pages[0]?.id ?? null);
-  const [statusMessage, setStatusMessage] = useState<string | null>(null);
-  const [exportMessage, setExportMessage] = useState<string | null>(null);
-  const [activeCitation, setActiveCitation] = useState<number | null>(null);
-  const [citationText, setCitationText] = useState<string>("");
+  const [statusMessage, setStatusMessage] = useState<string | null>("AIが絵本の下書き準備中（1分ほどかかります）");
   const [dialogueText, setDialogueText] = useState<string>("");
+  const [narrationDraft, setNarrationDraft] = useState<string>("");
   const [imageNote, setImageNote] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
-  const [isGeneratingImage, startGenerateImage] = useTransition();
+  const [isDraftLoading, setIsDraftLoading] = useState(true);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [activeTab, setActiveTab] = useState<SubTab>("editor");
+  const initialFetchProjectRef = useRef<string | null>(null);
+  const interactionDisabled = isDraftLoading;
+  const isPreparingDraft = isDraftLoading;
 
   const totalPages = pages.length;
 
-  const entryMap = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
+  useEffect(() => {
+    if (initialPages && initialPages.length > 0) {
+      pageCountRef.current = initialPages.length;
+      setPageCount(initialPages.length);
+      setPages(initialPages);
+      setSelectedPageId(initialPages[0]?.id ?? null);
+      setStatusMessage((current) => {
+        if (initialSource === "llm") {
+          return "LLMで生成した絵本ドラフトを読み込みました。";
+        }
+        return current ?? "プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。";
+      });
+      setActiveTab("editor");
+      setBatchProgress(0);
+      setImageError(null);
+      setImageNote(null);
+    }
+  }, [initialPages, initialSource]);
 
   useEffect(() => {
-    const initialPages = buildInitialPictureBookPages(sentences, entries, pageCountRef.current);
-    setPages(initialPages);
-    setSelectedPageId(initialPages[0]?.id ?? null);
-    setStatusMessage("プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。");
-    setActiveTab("editor");
-    setBatchProgress(0);
-    setImageError(null);
-    setImageNote(null);
-  }, [entries, sentences]);
+    if (!initialPages || initialPages.length === 0) {
+      const draft = buildInitialPictureBookPages(sentences, entries, pageCountRef.current);
+      setPages(draft);
+      setSelectedPageId(draft[0]?.id ?? null);
+      pageCountRef.current = draft.length;
+      setPageCount(draft.length);
+      setStatusMessage((current) => current ?? "プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。");
+      setActiveTab("editor");
+      setBatchProgress(0);
+      setImageError(null);
+      setImageNote(null);
+    }
+  }, [entries, sentences, initialPages]);
 
   useEffect(() => {
     if (!pages.length) {
@@ -93,27 +115,21 @@ export function PictureBookClient({
     if (!selectedPage) {
       setCitationText("");
       setDialogueText("");
+      setNarrationDraft("");
       setActiveCitation(null);
       return;
     }
-    setCitationText(selectedPage.citations.join(", "));
     setDialogueText(selectedPage.dialogues.join("\n"));
-    setActiveCitation(selectedPage.citations[0] ?? null);
+    setNarrationDraft(selectedPage.narration);
   }, [selectedPage]);
 
-  const selectedEntries = useMemo(() => {
+  const hasPageDraftChanges = useMemo(() => {
     if (!selectedPage) {
-      return [];
+      return false;
     }
-    return selectedPage.citations
-      .map((id) => entryMap.get(id))
-      .filter((entry): entry is EntryRecord => Boolean(entry))
-      .map((entry) => ({
-        id: entry.id,
-        text: entry.text,
-        summary: entry.summary ?? ""
-      }));
-  }, [entryMap, selectedPage]);
+    const originalDialogues = selectedPage.dialogues.join("\n");
+    return narrationDraft !== selectedPage.narration || dialogueText !== originalDialogues;
+  }, [dialogueText, narrationDraft, selectedPage]);
 
   const confirmReset = useCallback(() => {
     if (!pages.length) {
@@ -122,47 +138,135 @@ export function PictureBookClient({
     if (typeof window === "undefined") {
       return true;
     }
-    return window.confirm("現在の編集内容がリセットされます。自動割付を再計算してもよろしいですか？");
+    return window.confirm("現在の編集内容が失われ、AIが絵本を再生成します。続行してもよろしいですか？");
   }, [pages]);
 
-  const resetFeedback = () => {
+  const resetFeedback = useCallback(() => {
     setImageError(null);
     setImageNote(null);
-    setExportMessage(null);
-  };
+  }, []);
+
+  const requestDraft = useCallback(
+    async (
+      requestedCount: number,
+      options: {
+        onCancelled?: () => boolean;
+        previousCount?: number;
+        suppressReset?: boolean;
+      } = {}
+    ) => {
+      const { onCancelled, previousCount, suppressReset } = options;
+      const isCancelled = () => (onCancelled ? onCancelled() : false);
+
+      if (!suppressReset) {
+        resetFeedback();
+      }
+      setIsDraftLoading(true);
+      setStatusMessage("AIが絵本の下書き準備中（1分ほどかかります）");
+      setBatchProgress(0);
+      setIsBatchGenerating(false);
+
+      try {
+        const result = await generatePictureBookDraftAction({
+          projectKey,
+          pageCount: requestedCount
+        });
+        if (isCancelled()) {
+          return;
+        }
+        if (!result.ok || result.pages.length === 0) {
+          setStatusMessage(
+            result.ok
+              ? "絵本ドラフトを構築できませんでした。プロジェクトデータを確認してください。"
+              : result.message
+          );
+          if (typeof previousCount === "number") {
+            pageCountRef.current = previousCount;
+            setPageCount(previousCount);
+          }
+          return;
+        }
+
+        pageCountRef.current = result.pages.length;
+        setPageCount(result.pages.length);
+        setPages(result.pages);
+        setSelectedPageId(result.pages[0]?.id ?? null);
+        setActiveTab("editor");
+        setImageError(null);
+        setImageNote(null);
+        setStatusMessage(
+          result.source === "llm"
+            ? "AIが絵本の下書きを準備しました。"
+            : "プロジェクトデータをもとに絵本レイアウトを初期化しました。"
+        );
+      } catch (error) {
+        if (!isCancelled()) {
+          console.error("絵本ドラフトの読み込みに失敗しました:", error);
+          setStatusMessage("絵本ドラフトの取得に失敗しました。時間をおいて再試行してください。");
+          if (typeof previousCount === "number") {
+            pageCountRef.current = previousCount;
+            setPageCount(previousCount);
+          }
+        }
+      } finally {
+        if (!isCancelled()) {
+          setIsDraftLoading(false);
+        }
+      }
+    },
+    [projectKey, resetFeedback]
+  );
+
+  useEffect(() => {
+    if (initialFetchProjectRef.current === projectKey) {
+      return;
+    }
+    initialFetchProjectRef.current = projectKey;
+    let cancelled = false;
+
+    void requestDraft(pageCountRef.current, {
+      onCancelled: () => cancelled,
+      suppressReset: true
+    });
+
+    return () => {
+      cancelled = true;
+      initialFetchProjectRef.current = null;
+    };
+  }, [projectKey, requestDraft]);
 
   const handlePageCountChange = (nextCount: number) => {
+    if (interactionDisabled) {
+      return;
+    }
     if (nextCount === pageCount) {
       return;
     }
     if (!confirmReset()) {
       return;
     }
-    const nextPages = buildInitialPictureBookPages(sentences, entries, nextCount);
+    const previousCount = pageCountRef.current;
     pageCountRef.current = nextCount;
     setPageCount(nextCount);
-    setPages(nextPages);
-    setSelectedPageId(nextPages[0]?.id ?? null);
-    setStatusMessage(`ページ数を ${nextCount} 枚に変更し、自動割付を再計算しました。`);
     setActiveTab("editor");
-    setBatchProgress(0);
-    resetFeedback();
+    void requestDraft(nextCount, { previousCount });
   };
 
-  const handleAutoAllocate = () => {
+  const handleRegenerateDraft = () => {
+    if (interactionDisabled) {
+      return;
+    }
     if (!confirmReset()) {
       return;
     }
-    const nextPages = buildInitialPictureBookPages(sentences, entries, pageCount);
-    setPages(nextPages);
-    setSelectedPageId(nextPages[0]?.id ?? null);
-    setStatusMessage("シーンの自動割付を再実行しました。");
-    setActiveTab("editor");
-    setBatchProgress(0);
-    resetFeedback();
+    const currentCount = pageCountRef.current;
+    void requestDraft(currentCount, { previousCount: currentCount });
   };
 
   const handleMovePage = (pageId: string, delta: number) => {
+    if (interactionDisabled) {
+      return;
+    }
     setPages((prev) =>
       updatePageOrder(prev, (list) => {
         const index = list.findIndex((page) => page.id === pageId);
@@ -193,123 +297,37 @@ export function PictureBookClient({
     setActiveTab("editor");
   };
 
-  const handlePhaseChange = (phase: PictureBookPhase) => {
-    resetFeedback();
-    updateSelectedPage((page) => ({
-      ...page,
-      phase
-    }));
-  };
-
-  const handleNarrationChange = (value: string) => {
-    resetFeedback();
-    updateSelectedPage((page) => ({
-      ...page,
-      narration: value
-    }));
-  };
-
-  const handleImagePromptChange = (value: string) => {
-    resetFeedback();
-    updateSelectedPage((page) => ({
-      ...page,
-      imagePrompt: value
-    }));
-  };
-
-  const handleImageUrlChange = (value: string) => {
-    resetFeedback();
-    updateSelectedPage((page) => ({
-      ...page,
-      imageUrl: value.trim().length > 0 ? value : null
-    }));
-  };
-
-  const handleClearImage = () => {
-    resetFeedback();
-    updateSelectedPage((page) => ({
-      ...page,
-      imageUrl: null
-    }));
-    setStatusMessage("画像を未設定に戻しました。");
-  };
-
-  const handleDialogueApply = () => {
+  const handleSavePageEdits = () => {
+    if (interactionDisabled) {
+      return;
+    }
     if (!selectedPage) {
       return;
     }
+    resetFeedback();
+    const nextNarration = clampCharacters(narrationDraft.trim(), 200) || "シーンの概要を入力してください。";
     const lines = dialogueText
       .split(/\r?\n/)
       .map((line) => line.trim())
-      .filter((line) => line.length > 0);
-    setPages((prev) =>
-      prev.map((page) => (page.id === selectedPage.id ? { ...page, dialogues: lines } : page))
-    );
-    setStatusMessage("セリフ欄を更新しました。");
-    setActiveTab("editor");
-    resetFeedback();
-  };
+      .filter((line) => line.length > 0)
+      .map((line) => clampCharacters(line, 100))
+      .slice(0, 3);
 
-  const handleCitationsApply = () => {
-    if (!selectedPage) {
-      return;
-    }
-    const { valid, rejected } = parseCitationInput(citationText);
-    const filtered = valid.filter((id) => entryMap.has(id));
-    setPages((prev) =>
-      prev.map((page) =>
-        page.id === selectedPage.id
-          ? {
-              ...page,
-              citations: normaliseCitations(filtered)
-            }
-          : page
-      )
-    );
-    setActiveCitation(filtered[0] ?? null);
-    if (filtered.length === 0) {
-      setStatusMessage("引用チャンクが未設定です。該当する番号を入力してください。");
-    } else if (rejected.length > 0) {
-      setStatusMessage(`無効なチャンク番号を除外しました: ${rejected.join(", ")}`);
-    } else {
-      setStatusMessage("引用チャンクを更新しました。");
-    }
-    setActiveTab("editor");
-    resetFeedback();
-  };
-
-  const handleGenerateImage = () => {
-    if (!selectedPage) {
-      return;
-    }
-    resetFeedback();
-    startGenerateImage(async () => {
-      const response = await generatePictureBookImageAction({
-        projectKey,
-        pageNumber: selectedPage.pageNumber,
-        prompt: selectedPage.imagePrompt,
-        phase: selectedPage.phase
-      });
-      if (!response.ok) {
-        setImageError(response.message);
-        return;
-      }
-      setPages((prev) =>
-        prev.map((page) =>
-          page.id === selectedPage.id
-            ? {
-                ...page,
-                imageUrl: response.imageUrl
-              }
-            : page
-        )
-      );
-      setImageNote(response.note);
-      setStatusMessage(`Page ${selectedPage.pageNumber} の画像を更新しました。`);
-    });
+    updateSelectedPage((page) => ({
+      ...page,
+      narration: nextNarration,
+      dialogues: lines,
+      imagePrompt: buildImagePrompt(page.phase, nextNarration)
+    }));
+    setNarrationDraft(nextNarration);
+    setDialogueText(lines.join("\n"));
+    setStatusMessage(`Page ${selectedPage.pageNumber} を保存しました。`);
   };
 
   const handleCreatePictureBook = () => {
+    if (interactionDisabled) {
+      return;
+    }
     if (!pages.length || isBatchGenerating) {
       return;
     }
@@ -323,34 +341,51 @@ export function PictureBookClient({
 
     const run = async () => {
       let lastNote: string | null = null;
-      for (let index = 0; index < snapshot.length; index += 1) {
-        const page = snapshot[index];
-        setStatusMessage(`ページ ${index + 1}/${snapshot.length} の画像を生成しています…`);
-        const response = await generatePictureBookImageAction({
-          projectKey,
-          pageNumber: page.pageNumber,
-          prompt: page.imagePrompt,
-          phase: page.phase
-        });
-        if (!response.ok) {
-          setImageError(response.message);
-          setStatusMessage(`ページ ${page.pageNumber} の画像生成に失敗しました。`);
-          setIsBatchGenerating(false);
-          return;
-        }
-        lastNote = response.note;
-        setPages((prev) =>
-          prev.map((item) =>
-            item.id === page.id
-              ? {
-                  ...item,
-                  imageUrl: response.imageUrl
-                }
-              : item
-          )
+      let completed = 0;
+      const batchSize = 4;
+      for (let startIndex = 0; startIndex < snapshot.length; startIndex += batchSize) {
+        const batch = snapshot.slice(startIndex, startIndex + batchSize);
+        const batchLabelStart = startIndex + 1;
+        const batchLabelEnd = startIndex + batch.length;
+        setStatusMessage(
+          `ページ ${batchLabelStart}〜${batchLabelEnd}/${snapshot.length} の画像を生成しています…`
         );
-        setBatchProgress(index + 1);
+        const results = await Promise.all(
+          batch.map(async (page) => ({
+            page,
+            response: await generatePictureBookImageAction({
+              projectKey,
+              pageNumber: page.pageNumber,
+              prompt: page.imagePrompt,
+              phase: page.phase
+            })
+          }))
+        );
+
+        for (const { page, response } of results) {
+          if (!response.ok) {
+            setImageError(response.message);
+            setStatusMessage(`ページ ${page.pageNumber} の画像生成に失敗しました。`);
+            setIsBatchGenerating(false);
+            setBatchProgress(completed);
+            return;
+          }
+          lastNote = response.note;
+          completed += 1;
+          setPages((prev) =>
+            prev.map((item) =>
+              item.id === page.id
+                ? {
+                    ...item,
+                    imageUrl: response.imageUrl
+                  }
+                : item
+            )
+          );
+          setBatchProgress(completed);
+        }
       }
+
       setStatusMessage("全ページの画像生成が完了しました。");
       if (lastNote) {
         setImageNote(lastNote);
@@ -362,17 +397,6 @@ export function PictureBookClient({
     void run();
   };
 
-  const handleGeneratePreviewLink = () => {
-    const expires = new Date(Date.now() + 1000 * 60 * 60 * 24 * 7);
-    const iso = expires.toISOString().slice(0, 10);
-    const url = `https://preview.manga-support.ai/${projectKey}/picture-book?exp=${iso}`;
-    setExportMessage(`レビュー用URL（モック）: ${url}`);
-  };
-
-  const handleGenerateWatermarkedPdf = () => {
-    setExportMessage("透かし付きPDF出力は現在モックです。バックエンド接続後に有効化してください。");
-  };
-
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -381,12 +405,13 @@ export function PictureBookClient({
             type="button"
             onClick={() => setActiveTab("editor")}
             className={cn(
-              "inline-flex items-center justify-center rounded-md px-4 py-2 font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              "inline-flex items-center justify-center rounded-md px-4 py-2 font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60",
               activeTab === "editor"
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-background text-muted-foreground hover:bg-muted"
             )}
             aria-pressed={activeTab === "editor"}
+            disabled={interactionDisabled}
           >
             編集
           </button>
@@ -394,12 +419,13 @@ export function PictureBookClient({
             type="button"
             onClick={() => setActiveTab("created")}
             className={cn(
-              "inline-flex items-center justify-center rounded-md px-4 py-2 font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              "inline-flex items-center justify-center rounded-md px-4 py-2 font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60",
               activeTab === "created"
                 ? "bg-primary text-primary-foreground shadow-sm"
                 : "bg-background text-muted-foreground hover:bg-muted"
             )}
             aria-pressed={activeTab === "created"}
+            disabled={interactionDisabled}
           >
             新規作成
           </button>
@@ -409,10 +435,10 @@ export function PictureBookClient({
             type="button"
             onClick={handleCreatePictureBook}
             className={cn(
-              "inline-flex items-center gap-2 rounded-md border border-primary bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
-              (isBatchGenerating || isGeneratingImage) && "cursor-not-allowed opacity-60"
+              "inline-flex items-center gap-2 rounded-md border border-primary bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60",
+              isBatchGenerating && "opacity-60"
             )}
-            disabled={isBatchGenerating || isGeneratingImage}
+            disabled={interactionDisabled || isBatchGenerating}
           >
             {isBatchGenerating
               ? `生成中…（${batchProgress}/${totalPages || 1}）`
@@ -422,19 +448,26 @@ export function PictureBookClient({
           <button
             type="button"
             onClick={() => setActiveTab("editor")}
-            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+            className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={interactionDisabled}
           >
             編集に戻る
           </button>
         )}
       </div>
 
-      {statusMessage && (
-        <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
-          {statusMessage}
-          {isBatchGenerating && totalPages > 0 ? `（${batchProgress}/${totalPages}）` : ""}
-        </p>
-      )}
+      {statusMessage &&
+        (isPreparingDraft ? (
+          <div className="flex items-center gap-3 rounded-lg border border-primary/40 bg-primary/10 px-4 py-3 text-base font-semibold text-primary">
+            <RefreshCw className="h-5 w-5 animate-spin" aria-hidden />
+            <span>{statusMessage}</span>
+          </div>
+        ) : (
+          <p className="rounded-md bg-muted px-3 py-2 text-sm text-muted-foreground">
+            {statusMessage}
+            {isBatchGenerating && totalPages > 0 ? `（${batchProgress}/${totalPages}）` : ""}
+          </p>
+        ))}
       {imageError && (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {imageError}
@@ -445,12 +478,6 @@ export function PictureBookClient({
           {imageNote}
         </p>
       )}
-      {activeTab === "editor" && exportMessage && (
-        <p className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          {exportMessage}
-        </p>
-      )}
-
       {activeTab === "editor" ? (
         <>
           <section className="space-y-4 rounded-lg border border-border bg-card/70 p-6 shadow-sm">
@@ -469,12 +496,13 @@ export function PictureBookClient({
                     type="button"
                     onClick={() => handlePageCountChange(option)}
                     className={cn(
-                      "inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                      "inline-flex items-center justify-center rounded-md border px-4 py-2 text-sm font-medium transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60",
                       active
                         ? "border-primary bg-primary text-primary-foreground shadow-sm"
                         : "border-border bg-background hover:bg-muted"
                     )}
                     aria-pressed={active}
+                    disabled={interactionDisabled}
                   >
                     {option} ページ
                   </button>
@@ -482,11 +510,12 @@ export function PictureBookClient({
               })}
               <button
                 type="button"
-                onClick={handleAutoAllocate}
-                className="inline-flex items-center gap-2 rounded-md border border-dashed border-muted-foreground/60 px-4 py-2 text-sm text-muted-foreground transition hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                onClick={handleRegenerateDraft}
+                className="inline-flex items-center gap-2 rounded-md border border-dashed border-muted-foreground/60 px-4 py-2 text-sm font-medium text-muted-foreground transition hover:border-primary hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={interactionDisabled}
               >
                 <RefreshCw className="h-4 w-4" aria-hidden />
-                シーンを自動割付
+                絵本を再生成
               </button>
             </div>
           </section>
@@ -520,14 +549,15 @@ export function PictureBookClient({
                       <button
                         type="button"
                         onClick={() => setSelectedPageId(page.id)}
-                        className="w-full text-left"
+                        className="w-full text-left disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={interactionDisabled}
                       >
                         <div className="flex items-center justify-between gap-3">
                           <div className="space-y-1">
                             <p className="text-xs uppercase tracking-wide text-muted-foreground">
                               Page {page.pageNumber} / {page.phase}
                             </p>
-                            <p className="line-clamp-2 text-sm leading-relaxed text-foreground">
+                            <p className="text-sm leading-relaxed text-foreground">
                               {page.narration || "ナレーション未設定"}
                             </p>
                           </div>
@@ -539,7 +569,7 @@ export function PictureBookClient({
                                 event.stopPropagation();
                                 handleMovePage(page.id, -1);
                               }}
-                              disabled={index === 0}
+                              disabled={interactionDisabled || index === 0}
                               aria-label="前へ移動"
                             >
                               <ChevronUp className="h-4 w-4" aria-hidden />
@@ -551,7 +581,7 @@ export function PictureBookClient({
                                 event.stopPropagation();
                                 handleMovePage(page.id, 1);
                               }}
-                              disabled={index === pages.length - 1}
+                              disabled={interactionDisabled || index === pages.length - 1}
                               aria-label="後ろへ移動"
                             >
                               <ChevronDown className="h-4 w-4" aria-hidden />
@@ -560,8 +590,8 @@ export function PictureBookClient({
                         </div>
                       </button>
                       {page.dialogues.length > 0 && (
-                        <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">
-                          セリフ例: {page.dialogues[0]}
+                        <p className="mt-2 text-xs text-foreground">
+                          {page.dialogues[0]}
                         </p>
                       )}
                     </div>
@@ -590,162 +620,49 @@ export function PictureBookClient({
                       </span>
                     </header>
 
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        フェーズ
-                      </span>
-                      <select
-                        value={selectedPage.phase}
-                        onChange={(event) => handlePhaseChange(event.target.value as PictureBookPhase)}
-                        className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      >
-                        {PICTURE_BOOK_PHASES.map((phase) => (
-                          <option key={phase} value={phase}>
-                            {phase}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        画像プロンプト
-                      </span>
-                      <textarea
-                        value={selectedPage.imagePrompt}
-                        onChange={(event) => handleImagePromptChange(event.target.value)}
-                        rows={3}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      />
-                      <div className="flex flex-wrap gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={handleGenerateImage}
-                          className="inline-flex items-center gap-2 rounded-md border border-primary bg-primary/90 px-4 py-2 text-sm font-medium text-primary-foreground transition hover:bg-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
-                          disabled={isGeneratingImage}
-                        >
-                          {isGeneratingImage ? (
-                            "画像生成中…"
-                          ) : (
-                            <>
-                              <RefreshCw className="h-4 w-4" aria-hidden />
-                              画像を生成
-                            </>
-                          )}
-                        </button>
-                      </div>
-                    </label>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        画像URL
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="url"
-                          value={selectedPage.imageUrl ?? ""}
-                          onChange={(event) => handleImageUrlChange(event.target.value)}
-                          placeholder="画像のURLを入力"
-                          className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    <div className="space-y-4">
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          ナレーション
+                        </span>
+                        <textarea
+                          value={narrationDraft}
+                          onChange={(event) => setNarrationDraft(event.target.value)}
+                          rows={4}
+                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted/80"
+                          placeholder="シーンの概要を入力してください。"
+                          disabled={interactionDisabled}
                         />
-                        <button
-                          type="button"
-                          onClick={handleClearImage}
-                          className="inline-flex items-center gap-1 rounded-md border border-border px-3 py-2 text-xs text-muted-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        >
-                          <X className="h-3.5 w-3.5" aria-hidden />
-                          クリア
-                        </button>
-                      </div>
-                      <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 p-3 text-xs text-muted-foreground">
-                        画像生成APIとの連携は未接続です。プロンプトとURLをメモとして使用してください。
-                      </div>
-                      {selectedPage.imageUrl && (
-                        <div className="rounded-md border border-border bg-background p-3">
-                          <Image
-                            src={selectedPage.imageUrl}
-                            alt={`${selectedPage.phase} シーンの参考画像`}
-                            width={800}
-                            height={600}
-                            className="h-48 w-full rounded-md object-cover"
-                            unoptimized
-                          />
-                        </div>
-                      )}
-                    </label>
+                      </label>
 
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        ナレーション
-                      </span>
-                      <textarea
-                        value={selectedPage.narration}
-                        onChange={(event) => handleNarrationChange(event.target.value)}
-                        rows={4}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      />
-                    </label>
+                      <label className="flex flex-col gap-1">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          セリフ
+                        </span>
+                        <textarea
+                          value={dialogueText}
+                          onChange={(event) => setDialogueText(event.target.value)}
+                          rows={4}
+                          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:bg-muted/80"
+                          placeholder="例：ジョバンニ：「星祭りはきっと盛大になるよ！」"
+                          disabled={interactionDisabled}
+                        />
+                      </label>
+                    </div>
 
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        セリフ候補
-                      </span>
-                      <textarea
-                        value={dialogueText}
-                        onChange={(event) => setDialogueText(event.target.value)}
-                        onBlur={handleDialogueApply}
-                        rows={3}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        placeholder="1行につき1つのセリフを入力してください。"
-                      />
-                    </label>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        引用チャンク番号
-                      </span>
-                      <input
-                        value={citationText}
-                        onChange={(event) => setCitationText(event.target.value)}
-                        onBlur={handleCitationsApply}
-                        placeholder="例: 3, 12, 13"
-                        className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      />
-                      <CitationList
-                        citations={selectedPage.citations}
-                        activeId={activeCitation}
-                        onSelect={(id) => setActiveCitation(id)}
-                        className="mt-1"
-                      />
-                    </label>
-
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex justify-end">
                       <button
                         type="button"
-                        onClick={handleGeneratePreviewLink}
-                        className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                        onClick={handleSavePageEdits}
+                        className="inline-flex items-center gap-2 rounded-md border border-primary bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                        disabled={interactionDisabled || !hasPageDraftChanges}
                       >
-                        <Link className="h-4 w-4" aria-hidden />
-                        レビュー用URL（モック）
-                      </button>
-                      <button
-                        type="button"
-                        onClick={handleGenerateWatermarkedPdf}
-                        className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-4 py-2 text-sm font-medium transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      >
-                        <FileDown className="h-4 w-4" aria-hidden />
-                        透かしPDF（モック）
+                        変更を保存
                       </button>
                     </div>
                   </>
                 )}
               </section>
-
-              <SourcePanel
-                entries={selectedEntries}
-                highlightedIds={selectedPage?.citations ?? []}
-                activeId={activeCitation}
-              />
             </div>
           </div>
         </>
@@ -766,14 +683,14 @@ export function PictureBookClient({
                 key={page.id}
                 className="grid gap-4 rounded-lg border border-border bg-card/90 p-4 shadow-sm lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)]"
               >
-                <div className="relative flex h-56 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
+                <div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
                   {page.imageUrl ? (
                     <Image
                       src={page.imageUrl}
                       alt={`Page ${page.pageNumber} / ${page.phase}`}
                       width={1024}
                       height={768}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                       unoptimized
                     />
                   ) : (
@@ -791,17 +708,13 @@ export function PictureBookClient({
                   </div>
                   {page.dialogues.length > 0 && (
                     <div className="space-y-1">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        セリフ候補
-                      </p>
-                      <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                        {page.dialogues.map((line, index) => (
-                          <li key={`${page.id}-dialogue-${index}`}>{line}</li>
-                        ))}
-                      </ul>
+                      {page.dialogues.map((line, index) => (
+                        <p key={`${page.id}-dialogue-${index}`} className="text-sm text-foreground">
+                          {line}
+                        </p>
+                      ))}
                     </div>
                   )}
-                  <CitationList citations={page.citations} className="pt-1" />
                 </div>
               </article>
             ))}
@@ -813,25 +726,4 @@ export function PictureBookClient({
       )}
     </div>
   );
-}
-
-function parseCitationInput(text: string): { valid: number[]; rejected: string[] } {
-  if (!text.trim()) {
-    return { valid: [], rejected: [] };
-  }
-  const tokens = text
-    .split(/[,，\s]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-  const valid: number[] = [];
-  const rejected: string[] = [];
-  for (const token of tokens) {
-    const value = Number.parseInt(token, 10);
-    if (Number.isInteger(value)) {
-      valid.push(value);
-    } else {
-      rejected.push(token);
-    }
-  }
-  return { valid, rejected };
 }

@@ -71,7 +71,7 @@ export function SourcePanel({ entries, highlightedIds = [], activeId = null }: S
             ref={setEntryRef(entry.id)}
             tabIndex={0}
             className={cn(
-              "rounded-md border border-border/50 bg-background/80 p-3 text-sm transition outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+              "select-text rounded-md border border-border/50 bg-background/80 p-3 text-sm transition outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               (highlightedSet.has(entry.id) || entry.id === activeId) &&
                 "border-primary/60 bg-primary/5 shadow-sm",
               entry.id === activeId && "ring-2 ring-primary/40"
@@ -80,11 +80,11 @@ export function SourcePanel({ entries, highlightedIds = [], activeId = null }: S
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Chunk {entry.id}
             </p>
-            <p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground">
+            <p className="mt-2 whitespace-pre-wrap leading-relaxed text-foreground select-text">
               {entry.text || "（本文なし）"}
             </p>
             {entry.summary && entry.summary.trim().length > 0 && (
-              <p className="mt-2 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground">
+              <p className="mt-2 rounded-md bg-muted px-2 py-1 text-xs text-muted-foreground select-text">
                 要約: {entry.summary}
               </p>
             )}

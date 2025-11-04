@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { PictureBookClient } from "@/components/picture-book/picture-book-client";
+import { DEFAULT_PICTURE_BOOK_PAGE_COUNT, buildInitialPictureBookPages } from "@/lib/picture-book/utils";
 import { getProjectByKey } from "@/lib/projects/repository";
 
 type PictureBookPageProps = {
@@ -14,6 +15,9 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
     notFound();
   }
 
+  const summarySentences = project.summarySentences ?? [];
+  const initialPages = buildInitialPictureBookPages(summarySentences, project.entries, DEFAULT_PICTURE_BOOK_PAGE_COUNT);
+
   return (
     <section className="space-y-6">
       <header className="space-y-2">
@@ -26,7 +30,9 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
         projectKey={project.key}
         projectTitle={project.title}
         entries={project.entries}
-        sentences={project.summarySentences ?? []}
+        sentences={summarySentences}
+        initialPages={initialPages}
+        initialSource="fallback"
       />
     </section>
   );

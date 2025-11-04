@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SummarySentence, ProjectData } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
 
@@ -8,15 +8,55 @@ type SummaryPreviewProps = {
   project: ProjectData;
 };
 
+type SummaryPreviewUpdateDetail = {
+  summary: string;
+  sentences: SummarySentence[];
+};
+
 export function SummaryPreview({ project }: SummaryPreviewProps) {
-  const { summarySentences = [], summary, entries } = project;
+  const { summarySentences = [], summary = "", entries } = project;
+  const [previewSummary, setPreviewSummary] = useState(summary ?? "");
+  const [previewSentences, setPreviewSentences] = useState<SummarySentence[]>(summarySentences);
   const [activeCitation, setActiveCitation] = useState<number | null>(null);
 
-  const sentenceList = useMemo(() => summarySentences, [summarySentences]);
+  useEffect(() => {
+    setPreviewSummary(summary ?? "");
+  }, [summary]);
+
+  useEffect(() => {
+    setPreviewSentences(summarySentences);
+  }, [summarySentences]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<SummaryPreviewUpdateDetail>).detail;
+      if (!detail) {
+        return;
+      }
+      const nextSummary = typeof detail.summary === "string" ? detail.summary : "";
+      const nextSentences = Array.isArray(detail.sentences) ? detail.sentences : [];
+      setPreviewSummary(nextSummary);
+      setPreviewSentences(nextSentences);
+      const nextActiveCitation =
+        nextSentences
+          .flatMap((sentence) => sentence.citations ?? [])
+          .find((citation) => typeof citation === "number") ?? null;
+      setActiveCitation(nextActiveCitation);
+    };
+
+    window.addEventListener("summary:preview-update", handler as EventListener);
+    return () => {
+      window.removeEventListener("summary:preview-update", handler as EventListener);
+    };
+  }, []);
 
   const displaySentences = useMemo(
-    () => buildDisplaySentences(summary, sentenceList),
-    [summary, sentenceList]
+    () => buildDisplaySentences(previewSummary, previewSentences),
+    [previewSummary, previewSentences]
   );
 
   const handleCitationSelect = useCallback((citation: number) => {
@@ -29,12 +69,6 @@ export function SummaryPreview({ project }: SummaryPreviewProps) {
       <div>
         <p className="text-xs uppercase tracking-wide text-muted-foreground">チャンク数</p>
         <p className="mt-1 text-2xl font-semibold">{entries.length}</p>
-        <p className="mt-4 text-xs uppercase tracking-wide text-muted-foreground">脚注</p>
-        <FootnoteList
-          sentences={displaySentences}
-          activeCitation={activeCitation}
-          onSelect={handleCitationSelect}
-        />
       </div>
       <div className="md:col-span-2 space-y-4">
         <section className="space-y-2">
@@ -112,9 +146,9 @@ function SummaryExcerpt({ sentences, activeCitation, onSelectCitation }: Summary
     return null;
   }
   return (
-    <div className="space-y-2 text-sm leading-relaxed text-foreground">
+    <div className="space-y-2 select-text text-sm leading-relaxed text-foreground">
       {sentences.map((sentence, sentenceIndex) => (
-        <p key={`preview-${sentenceIndex}`} className="whitespace-pre-wrap">
+        <p key={`preview-${sentenceIndex}`} className="whitespace-pre-wrap select-text">
           {sentence.text}
           {sentence.citations.map((citation, citationIndex) => {
             const isActive = citation === activeCitation;
@@ -139,39 +173,5 @@ function SummaryExcerpt({ sentences, activeCitation, onSelectCitation }: Summary
         </p>
       ))}
     </div>
-  );
-}
-
-type FootnoteListProps = {
-  sentences: SummarySentence[];
-  activeCitation: number | null;
-  onSelect: (citation: number) => void;
-};
-
-function FootnoteList({ sentences, activeCitation, onSelect }: FootnoteListProps) {
-  const citations = sentences.flatMap((sentence) => sentence.citations);
-  if (!citations.length) {
-    return <p className="text-sm text-muted-foreground">脚注情報がありません。</p>;
-  }
-  const unique = Array.from(new Set(citations)).sort((a, b) => a - b);
-  return (
-    <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
-      {unique.map((citation) => (
-        <li key={citation}>
-          <button
-            type="button"
-            onClick={() => onSelect(citation)}
-            className={cn(
-              "rounded border border-transparent px-2 py-1 text-left transition",
-              citation === activeCitation
-                ? "border-primary bg-primary/10 text-primary"
-                : "hover:border-border hover:bg-muted/40"
-            )}
-          >
-            チャンク {citation}
-          </button>
-        </li>
-      ))}
-    </ul>
   );
 }

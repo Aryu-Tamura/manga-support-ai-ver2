@@ -53,6 +53,29 @@ body {
   font-feature-settings: "rlig" 1, "calt" 1;
 }
 
+@layer base {
+  p,
+  span,
+  li,
+  dd,
+  dt,
+  blockquote,
+  pre,
+  code,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6,
+  label,
+  strong,
+  em,
+  a {
+    @apply select-text;
+  }
+}
+
 ::selection {
   background-color: hsla(var(--primary), 0.2);
 }
