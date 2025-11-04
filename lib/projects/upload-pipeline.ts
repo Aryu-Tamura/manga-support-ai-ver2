@@ -1,7 +1,6 @@
 import { generateOverallSummaryFromText, generateEntrySummary } from "@/lib/summary/service";
 import { extractCharactersFromText } from "@/lib/characters/service";
 import { relabelTextWithLLM } from "@/lib/projects/relabel";
-import { getOpenAIClient } from "@/lib/server/openai";
 
 type PipelineInput = {
   title: string;
@@ -25,7 +24,6 @@ export async function runUploadPipeline(input: PipelineInput): Promise<PipelineO
     throw new Error("本文が空のためプロジェクトを生成できません。");
   }
 
-  const client = getOpenAIClient();
   const relabeled = await relabelTextWithLLM({
     fullText: cleaned,
     styleHint,
@@ -35,7 +33,7 @@ export async function runUploadPipeline(input: PipelineInput): Promise<PipelineO
   const entries = await Promise.all(
     limitedEntries.map(async (entry) => ({
       ...entry,
-      summary: await generateEntrySummary(entry.text, 160, client)
+      summary: await generateEntrySummary(entry.text, 160)
     }))
   );
 

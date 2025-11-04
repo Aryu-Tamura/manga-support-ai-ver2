@@ -38,8 +38,9 @@ export async function generateSummaryVariations(
     return buildSampleVariations(input.summary);
   }
 
-  const citationLine = (input.citations ?? []).length
-    ? `参照チャンク: ${input.citations.join(", ")}`
+  const citations = input.citations ?? [];
+  const citationLine = citations.length
+    ? `参照チャンク: ${citations.join(", ")}`
     : "";
   const prompt = [
     "対象の要約文:",
