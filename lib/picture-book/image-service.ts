@@ -2,6 +2,18 @@ import { Buffer } from "node:buffer";
 import type { PictureBookPhase } from "@/lib/picture-book/utils";
 
 const GEMINI_DEFAULT_MODEL = "models/imagegeneration";
+const GEMINI_CONCURRENCY_LIMIT = Math.max(
+  1,
+  Number.parseInt(process.env.GEMINI_IMAGE_CONCURRENCY ?? "3", 10) || 3
+);
+const GEMINI_BILLING_PROJECT =
+  process.env.GEMINI_BILLING_PROJECT?.trim() ?? process.env.GEMINI_API_BILLING_PROJECT?.trim() ?? null;
+const GEMINI_USE_USER_PROJECT_HEADER = parseBoolean(
+  process.env.GEMINI_USE_USER_PROJECT_HEADER ?? process.env.GEMINI_ENABLE_USER_PROJECT_HEADER ?? "false"
+);
+
+let activeGeminiImageRequests = 0;
+const pendingGeminiResolvers: Array<() => void> = [];
 
 type GeneratePictureBookImageInput = {
   projectKey: string;
@@ -63,12 +75,24 @@ type GeminiInlineData = {
 export async function generatePictureBookImage(
   input: GeneratePictureBookImageInput
 ): Promise<PictureBookImageServiceResult> {
+  await acquireGeminiSlot();
+  try {
+    return await executeGeneratePictureBookImage(input);
+  } finally {
+    releaseGeminiSlot();
+  }
+}
+
+async function executeGeneratePictureBookImage(
+  input: GeneratePictureBookImageInput
+): Promise<PictureBookImageServiceResult> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
     return buildSampleImage(input, "GEMINI_API_KEY が未設定のため、プレースホルダー画像を返します。");
   }
 
-  const model = process.env.GEMINI_IMAGE_MODEL ?? GEMINI_DEFAULT_MODEL;
+  const configuredModel = process.env.GEMINI_IMAGE_MODEL?.trim();
+  const model = normaliseGeminiModelName(configuredModel ?? GEMINI_DEFAULT_MODEL);
   const endpoint = process.env.GEMINI_API_ENDPOINT ?? "https://generativelanguage.googleapis.com/v1beta";
   const lowerModel = model.toLowerCase();
   const preferImageGeneration = /imagegeneration|image/.test(lowerModel);
@@ -131,9 +155,32 @@ export async function generatePictureBookImage(
   );
 }
 
+async function acquireGeminiSlot() {
+  if (activeGeminiImageRequests < GEMINI_CONCURRENCY_LIMIT) {
+    activeGeminiImageRequests += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    pendingGeminiResolvers.push(() => {
+      activeGeminiImageRequests += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseGeminiSlot() {
+  if (activeGeminiImageRequests > 0) {
+    activeGeminiImageRequests -= 1;
+  }
+  const next = pendingGeminiResolvers.shift();
+  if (next) {
+    next();
+  }
+}
+
 function buildPrompt(input: GeneratePictureBookImageInput) {
   return [
-    "以下の情報にもとづいて、コミカライズ向けの絵本用1枚絵を生成してください。",
+    "以下の情報にもとづいて、絵本用1枚絵を生成してください。",
     `プロジェクト: ${input.projectKey}`,
     `ページ番号: ${input.pageNumber}`,
     `構成フェーズ: ${input.phase}`,
@@ -141,7 +188,8 @@ function buildPrompt(input: GeneratePictureBookImageInput) {
     input.prompt,
     "---- 指示 ----",
     "構図やキャラクターデザインは日本のコミック調で、高解像度のカラービジュアルにしてください。",
-    "テキストやウォーターマークは入れないでください。"
+    "1024x1024 の正方形キャンバスを前提に構図を調整し、上下左右が途切れないようにしてください。",
+    "文字やウォーターマークは絶対に入れないでください。"
   ].join("\n");
 }
 
@@ -265,24 +313,24 @@ type EndpointResult =
 async function callGenerativeContentEndpoint(params: EndpointRequest): Promise<EndpointResult> {
   const { apiKey, endpoint, model, prompt } = params;
   const url = `${endpoint}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const requestBody = {
+  const requestBody: Record<string, unknown> = {
     contents: [
       {
         role: "user",
         parts: [{ text: prompt }]
       }
-    ],
-    generationConfig: {
-      responseMimeType: "image/png",
-      temperature: 0.4
-    }
+    ]
   };
+  const generationConfig: Record<string, unknown> = {
+    temperature: 0.4
+  };
+  if (Object.keys(generationConfig).length > 0) {
+    requestBody.generationConfig = generationConfig;
+  }
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: buildGeminiHeaders(apiKey),
     body: JSON.stringify(requestBody)
   });
 
@@ -290,7 +338,7 @@ async function callGenerativeContentEndpoint(params: EndpointRequest): Promise<E
     const errorText = await safeReadText(response);
     return {
       type: "error",
-      message: `HTTP ${response.status}: ${errorText}`
+      message: buildGeminiErrorMessage(response.status, errorText)
     };
   }
 
@@ -322,6 +370,7 @@ async function callGenerativeContentEndpoint(params: EndpointRequest): Promise<E
     };
   }
 
+  console.warn("Gemini generateContent レスポンス解析に失敗:", safeJsonPreview(data));
   return {
     type: "error",
     message: "画像データがレスポンスに含まれていません。"
@@ -331,24 +380,24 @@ async function callGenerativeContentEndpoint(params: EndpointRequest): Promise<E
 async function callImageGenerationEndpoint(params: EndpointRequest): Promise<EndpointResult> {
   const { apiKey, endpoint, model, prompt } = params;
   const url = `${endpoint}/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const requestBody = {
+  const requestBody: Record<string, unknown> = {
     contents: [
       {
         role: "user",
         parts: [{ text: prompt }]
       }
-    ],
-    generationConfig: {
-      responseMimeType: "image/png",
-      temperature: 0.4
-    }
+    ]
   };
+  const generationConfig: Record<string, unknown> = {
+    temperature: 0.4
+  };
+  if (Object.keys(generationConfig).length > 0) {
+    requestBody.generationConfig = generationConfig;
+  }
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: buildGeminiHeaders(apiKey),
     body: JSON.stringify(requestBody)
   });
 
@@ -356,7 +405,7 @@ async function callImageGenerationEndpoint(params: EndpointRequest): Promise<End
     const errorText = await safeReadText(response);
     return {
       type: "error",
-      message: `HTTP ${response.status}: ${errorText}`
+      message: buildGeminiErrorMessage(response.status, errorText)
     };
   }
 
@@ -373,6 +422,16 @@ async function callImageGenerationEndpoint(params: EndpointRequest): Promise<End
     }
   }
 
+  const inlineData = extractInlineData(data);
+  if (inlineData?.data) {
+    return {
+      type: "success",
+      imageUrl: `data:${inlineData.mimeType ?? "image/png"};base64,${inlineData.data}`,
+      note: "Gemini API (imagegeneration) で画像を生成しました。"
+    };
+  }
+
+  console.warn("Gemini imagegeneration レスポンス解析に失敗:", safeJsonPreview(data));
   return {
     type: "error",
     message: "画像データがレスポンスに含まれていません。"
@@ -390,9 +449,7 @@ async function callLegacyImageEndpoint(params: EndpointRequest): Promise<Endpoin
 
   const response = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers: buildGeminiHeaders(apiKey),
     body: JSON.stringify(requestBody)
   });
 
@@ -400,7 +457,7 @@ async function callLegacyImageEndpoint(params: EndpointRequest): Promise<Endpoin
     const errorText = await safeReadText(response);
     return {
       type: "error",
-      message: `HTTP ${response.status}: ${errorText}`
+      message: buildGeminiErrorMessage(response.status, errorText)
     };
   }
 
@@ -568,4 +625,58 @@ function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+function normaliseGeminiModelName(value: string) {
+  const trimmed = value.trim();
+  return trimmed.startsWith("models/") ? trimmed : `models/${trimmed}`;
+}
+
+function buildGeminiHeaders(apiKey: string) {
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    "X-Goog-Api-Key": apiKey
+  };
+  const billingProject = GEMINI_BILLING_PROJECT;
+  if (billingProject && GEMINI_USE_USER_PROJECT_HEADER) {
+    headers["X-Goog-User-Project"] = billingProject;
+  }
+  return headers;
+}
+
+function buildGeminiErrorMessage(status: number, errorText: string) {
+  if (
+    status === 403 &&
+    (/USER_PROJECT_DENIED/i.test(errorText) || /serviceusage\.serviceUsageConsumer/i.test(errorText))
+  ) {
+    const parts = [
+      "Gemini API の請求プロジェクトにアクセスできませんでした。",
+      "Google Cloud コンソールで Generative Language API を有効化し、呼び出し元アカウントに roles/serviceusage.serviceUsageConsumer 権限を付与してください。"
+    ];
+    if (!GEMINI_BILLING_PROJECT || !GEMINI_USE_USER_PROJECT_HEADER) {
+      parts.push(
+        "環境変数 GEMINI_BILLING_PROJECT（または GEMINI_API_BILLING_PROJECT）と GEMINI_USE_USER_PROJECT_HEADER=true を設定すると、x-goog-user-project ヘッダーを付与できます。"
+      );
+    } else {
+      parts.push(`現在設定されている請求プロジェクト: ${GEMINI_BILLING_PROJECT}`);
+    }
+    parts.push(
+      "反映後、数分待ってから再度リクエストをお試しください。詳細: https://ai.google.dev/gemini-api/docs/troubleshooting"
+    );
+    return parts.join(" ");
+  }
+  return `HTTP ${status}: ${errorText}`;
+}
+
+function parseBoolean(source: string) {
+  const normalised = source.trim().toLowerCase();
+  return ["1", "true", "yes", "on"].includes(normalised);
+}
+
+function safeJsonPreview(value: unknown) {
+  try {
+    return JSON.stringify(value)?.slice(0, 2000) ?? "";
+  } catch (error) {
+    return String(error);
+  }
 }

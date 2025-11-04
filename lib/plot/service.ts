@@ -19,7 +19,7 @@ export type PlotGenerationResult = {
 };
 
 const PLOT_SYSTEM_PROMPT =
-  "あなたは漫画ネーム制作の脚本アシスタントです。提供された本文チャンクを参考に、会話主体の叩き台を生成してください。";
+  "あなたは漫画ネーム制作の脚本アシスタントです。文章を参考に、漫画のセリフを生成してください。";
 
 export async function generatePlotScript(
   input: PlotGenerationInput

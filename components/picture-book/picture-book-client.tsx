@@ -11,13 +11,11 @@ import {
 } from "react";
 import { ChevronDown, ChevronUp, FileDown, Link, RefreshCw, X } from "lucide-react";
 import { generatePictureBookImageAction } from "@/app/(dashboard)/projects/[projectKey]/picture-book/actions";
-import { CitationList } from "@/components/shared/citation-list";
-import { SourcePanel } from "@/components/summary/source-panel";
 import {
   PICTURE_BOOK_PAGE_OPTIONS,
   PICTURE_BOOK_PHASES,
   buildInitialPictureBookPages,
-  normaliseCitations,
+  clampCharacters,
   updatePageOrder,
   type PictureBookPage,
   type PictureBookPhase
@@ -30,6 +28,8 @@ type PictureBookClientProps = {
   projectTitle: string;
   entries: EntryRecord[];
   sentences: SummarySentence[];
+  initialPages?: PictureBookPage[] | null;
+  initialSource?: "llm" | "fallback";
 };
 
 type SubTab = "editor" | "created";
@@ -38,19 +38,21 @@ export function PictureBookClient({
   projectKey,
   projectTitle,
   entries,
-  sentences
+  sentences,
+  initialPages,
+  initialSource
 }: PictureBookClientProps) {
   const defaultPageCount = PICTURE_BOOK_PAGE_OPTIONS[1] ?? 12;
-  const [pageCount, setPageCount] = useState<number>(defaultPageCount);
-  const pageCountRef = useRef<number>(defaultPageCount);
-  const [pages, setPages] = useState<PictureBookPage[]>(() =>
-    buildInitialPictureBookPages(sentences, entries, defaultPageCount)
-  );
+  const initialPageList =
+    initialPages && initialPages.length > 0
+      ? initialPages
+      : buildInitialPictureBookPages(sentences, entries, defaultPageCount);
+  const [pageCount, setPageCount] = useState<number>(initialPageList.length || defaultPageCount);
+  const pageCountRef = useRef<number>(initialPageList.length || defaultPageCount);
+  const [pages, setPages] = useState<PictureBookPage[]>(initialPageList);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(pages[0]?.id ?? null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [exportMessage, setExportMessage] = useState<string | null>(null);
-  const [activeCitation, setActiveCitation] = useState<number | null>(null);
-  const [citationText, setCitationText] = useState<string>("");
   const [dialogueText, setDialogueText] = useState<string>("");
   const [imageNote, setImageNote] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
@@ -61,18 +63,38 @@ export function PictureBookClient({
 
   const totalPages = pages.length;
 
-  const entryMap = useMemo(() => new Map(entries.map((entry) => [entry.id, entry])), [entries]);
+  useEffect(() => {
+    if (initialPages && initialPages.length > 0) {
+      pageCountRef.current = initialPages.length;
+      setPageCount(initialPages.length);
+      setPages(initialPages);
+      setSelectedPageId(initialPages[0]?.id ?? null);
+      setStatusMessage(
+        initialSource === "llm"
+          ? "LLMで生成した絵本ドラフトを読み込みました。"
+          : "プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。"
+      );
+      setActiveTab("editor");
+      setBatchProgress(0);
+      setImageError(null);
+      setImageNote(null);
+    }
+  }, [initialPages, initialSource]);
 
   useEffect(() => {
-    const initialPages = buildInitialPictureBookPages(sentences, entries, pageCountRef.current);
-    setPages(initialPages);
-    setSelectedPageId(initialPages[0]?.id ?? null);
-    setStatusMessage("プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。");
-    setActiveTab("editor");
-    setBatchProgress(0);
-    setImageError(null);
-    setImageNote(null);
-  }, [entries, sentences]);
+    if (!initialPages || initialPages.length === 0) {
+      const draft = buildInitialPictureBookPages(sentences, entries, pageCountRef.current);
+      setPages(draft);
+      setSelectedPageId(draft[0]?.id ?? null);
+      pageCountRef.current = draft.length;
+      setPageCount(draft.length);
+      setStatusMessage("プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。");
+      setActiveTab("editor");
+      setBatchProgress(0);
+      setImageError(null);
+      setImageNote(null);
+    }
+  }, [entries, sentences, initialPages]);
 
   useEffect(() => {
     if (!pages.length) {
@@ -96,24 +118,8 @@ export function PictureBookClient({
       setActiveCitation(null);
       return;
     }
-    setCitationText(selectedPage.citations.join(", "));
     setDialogueText(selectedPage.dialogues.join("\n"));
-    setActiveCitation(selectedPage.citations[0] ?? null);
   }, [selectedPage]);
-
-  const selectedEntries = useMemo(() => {
-    if (!selectedPage) {
-      return [];
-    }
-    return selectedPage.citations
-      .map((id) => entryMap.get(id))
-      .filter((entry): entry is EntryRecord => Boolean(entry))
-      .map((entry) => ({
-        id: entry.id,
-        text: entry.text,
-        summary: entry.summary ?? ""
-      }));
-  }, [entryMap, selectedPage]);
 
   const confirmReset = useCallback(() => {
     if (!pages.length) {
@@ -205,7 +211,7 @@ export function PictureBookClient({
     resetFeedback();
     updateSelectedPage((page) => ({
       ...page,
-      narration: value
+      narration: clampCharacters(value, 200)
     }));
   };
 
@@ -242,38 +248,13 @@ export function PictureBookClient({
       .split(/\r?\n/)
       .map((line) => line.trim())
       .filter((line) => line.length > 0);
-    setPages((prev) =>
-      prev.map((page) => (page.id === selectedPage.id ? { ...page, dialogues: lines } : page))
-    );
-    setStatusMessage("セリフ欄を更新しました。");
-    setActiveTab("editor");
-    resetFeedback();
-  };
-
-  const handleCitationsApply = () => {
-    if (!selectedPage) {
-      return;
-    }
-    const { valid, rejected } = parseCitationInput(citationText);
-    const filtered = valid.filter((id) => entryMap.has(id));
+    const limited = lines.map((line) => clampCharacters(line, 100));
     setPages((prev) =>
       prev.map((page) =>
-        page.id === selectedPage.id
-          ? {
-              ...page,
-              citations: normaliseCitations(filtered)
-            }
-          : page
+        page.id === selectedPage.id ? { ...page, dialogues: limited.slice(0, 3) } : page
       )
     );
-    setActiveCitation(filtered[0] ?? null);
-    if (filtered.length === 0) {
-      setStatusMessage("引用チャンクが未設定です。該当する番号を入力してください。");
-    } else if (rejected.length > 0) {
-      setStatusMessage(`無効なチャンク番号を除外しました: ${rejected.join(", ")}`);
-    } else {
-      setStatusMessage("引用チャンクを更新しました。");
-    }
+    setStatusMessage("セリフ欄を更新しました。");
     setActiveTab("editor");
     resetFeedback();
   };
@@ -323,34 +304,51 @@ export function PictureBookClient({
 
     const run = async () => {
       let lastNote: string | null = null;
-      for (let index = 0; index < snapshot.length; index += 1) {
-        const page = snapshot[index];
-        setStatusMessage(`ページ ${index + 1}/${snapshot.length} の画像を生成しています…`);
-        const response = await generatePictureBookImageAction({
-          projectKey,
-          pageNumber: page.pageNumber,
-          prompt: page.imagePrompt,
-          phase: page.phase
-        });
-        if (!response.ok) {
-          setImageError(response.message);
-          setStatusMessage(`ページ ${page.pageNumber} の画像生成に失敗しました。`);
-          setIsBatchGenerating(false);
-          return;
-        }
-        lastNote = response.note;
-        setPages((prev) =>
-          prev.map((item) =>
-            item.id === page.id
-              ? {
-                  ...item,
-                  imageUrl: response.imageUrl
-                }
-              : item
-          )
+      let completed = 0;
+      const batchSize = 3;
+      for (let startIndex = 0; startIndex < snapshot.length; startIndex += batchSize) {
+        const batch = snapshot.slice(startIndex, startIndex + batchSize);
+        const batchLabelStart = startIndex + 1;
+        const batchLabelEnd = startIndex + batch.length;
+        setStatusMessage(
+          `ページ ${batchLabelStart}〜${batchLabelEnd}/${snapshot.length} の画像を生成しています…`
         );
-        setBatchProgress(index + 1);
+        const results = await Promise.all(
+          batch.map(async (page) => ({
+            page,
+            response: await generatePictureBookImageAction({
+              projectKey,
+              pageNumber: page.pageNumber,
+              prompt: page.imagePrompt,
+              phase: page.phase
+            })
+          }))
+        );
+
+        for (const { page, response } of results) {
+          if (!response.ok) {
+            setImageError(response.message);
+            setStatusMessage(`ページ ${page.pageNumber} の画像生成に失敗しました。`);
+            setIsBatchGenerating(false);
+            setBatchProgress(completed);
+            return;
+          }
+          lastNote = response.note;
+          completed += 1;
+          setPages((prev) =>
+            prev.map((item) =>
+              item.id === page.id
+                ? {
+                    ...item,
+                    imageUrl: response.imageUrl
+                  }
+                : item
+            )
+          );
+          setBatchProgress(completed);
+        }
       }
+
       setStatusMessage("全ページの画像生成が完了しました。");
       if (lastNote) {
         setImageNote(lastNote);
@@ -527,7 +525,7 @@ export function PictureBookClient({
                             <p className="text-xs uppercase tracking-wide text-muted-foreground">
                               Page {page.pageNumber} / {page.phase}
                             </p>
-                            <p className="line-clamp-2 text-sm leading-relaxed text-foreground">
+                            <p className="text-sm leading-relaxed text-foreground">
                               {page.narration || "ナレーション未設定"}
                             </p>
                           </div>
@@ -560,8 +558,8 @@ export function PictureBookClient({
                         </div>
                       </button>
                       {page.dialogues.length > 0 && (
-                        <p className="mt-2 line-clamp-1 text-xs text-muted-foreground">
-                          セリフ例: {page.dialogues[0]}
+                        <p className="mt-2 text-xs text-foreground">
+                          セリフ: {page.dialogues[0]}
                         </p>
                       )}
                     </div>
@@ -687,35 +685,14 @@ export function PictureBookClient({
                     </label>
 
                     <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        セリフ候補
-                      </span>
+
                       <textarea
                         value={dialogueText}
                         onChange={(event) => setDialogueText(event.target.value)}
                         onBlur={handleDialogueApply}
                         rows={3}
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                        placeholder="1行につき1つのセリフを入力してください。"
-                      />
-                    </label>
-
-                    <label className="flex flex-col gap-1">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        引用チャンク番号
-                      </span>
-                      <input
-                        value={citationText}
-                        onChange={(event) => setCitationText(event.target.value)}
-                        onBlur={handleCitationsApply}
-                        placeholder="例: 3, 12, 13"
-                        className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      />
-                      <CitationList
-                        citations={selectedPage.citations}
-                        activeId={activeCitation}
-                        onSelect={(id) => setActiveCitation(id)}
-                        className="mt-1"
+                        placeholder="1行につき1つ、最大3つまでセリフを入力してください。"
                       />
                     </label>
 
@@ -740,12 +717,6 @@ export function PictureBookClient({
                   </>
                 )}
               </section>
-
-              <SourcePanel
-                entries={selectedEntries}
-                highlightedIds={selectedPage?.citations ?? []}
-                activeId={activeCitation}
-              />
             </div>
           </div>
         </>
@@ -766,14 +737,14 @@ export function PictureBookClient({
                 key={page.id}
                 className="grid gap-4 rounded-lg border border-border bg-card/90 p-4 shadow-sm lg:grid-cols-[minmax(0,0.7fr)_minmax(0,1fr)]"
               >
-                <div className="relative flex h-56 items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
+                <div className="relative flex aspect-square w-full items-center justify-center overflow-hidden rounded-md border border-border bg-muted/40">
                   {page.imageUrl ? (
                     <Image
                       src={page.imageUrl}
                       alt={`Page ${page.pageNumber} / ${page.phase}`}
                       width={1024}
                       height={768}
-                      className="h-full w-full object-cover"
+                      className="h-full w-full object-contain"
                       unoptimized
                     />
                   ) : (
@@ -791,17 +762,13 @@ export function PictureBookClient({
                   </div>
                   {page.dialogues.length > 0 && (
                     <div className="space-y-1">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                        セリフ候補
-                      </p>
-                      <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                        {page.dialogues.map((line, index) => (
-                          <li key={`${page.id}-dialogue-${index}`}>{line}</li>
-                        ))}
-                      </ul>
+                      {page.dialogues.map((line, index) => (
+                        <p key={`${page.id}-dialogue-${index}`} className="text-sm text-foreground">
+                          {line}
+                        </p>
+                      ))}
                     </div>
                   )}
-                  <CitationList citations={page.citations} className="pt-1" />
                 </div>
               </article>
             ))}
@@ -813,25 +780,4 @@ export function PictureBookClient({
       )}
     </div>
   );
-}
-
-function parseCitationInput(text: string): { valid: number[]; rejected: string[] } {
-  if (!text.trim()) {
-    return { valid: [], rejected: [] };
-  }
-  const tokens = text
-    .split(/[,，\s]+/)
-    .map((token) => token.trim())
-    .filter((token) => token.length > 0);
-  const valid: number[] = [];
-  const rejected: string[] = [];
-  for (const token of tokens) {
-    const value = Number.parseInt(token, 10);
-    if (Number.isInteger(value)) {
-      valid.push(value);
-    } else {
-      rejected.push(token);
-    }
-  }
-  return { valid, rejected };
 }
