@@ -17,16 +17,10 @@ export default async function ProjectValidationPage({ params }: ValidationPagePr
   const sentences = project.summarySentences ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-5xl">
-      <section className="space-y-6">
-        <header className="space-y-2">
-          <h2 className="text-2xl font-bold tracking-tight">{project.title} / 要約検証</h2>
-          <p className="text-muted-foreground">
-            要約ブロックの順序を整え、LLMにより表現候補や再構成要約を生成します。
-          </p>
-        </header>
+    <section className="w-full bg-muted/10">
+      <div className="mx-auto w-full max-w-[1600px] px-4 py-8 sm:px-6 lg:px-10">
         <ValidationClient projectKey={project.key} entries={project.entries} sentences={sentences} />
-      </section>
-    </div>
+      </div>
+    </section>
   );
 }
