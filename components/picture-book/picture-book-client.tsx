@@ -18,6 +18,7 @@ import {
 } from "@/lib/picture-book/utils";
 import type { EntryRecord, SummarySentence } from "@/lib/projects/types";
 import { cn } from "@/lib/utils";
+import { buildExportFilename } from "@/lib/picture-book/filename";
 
 type PictureBookClientProps = {
   projectKey: string;
@@ -29,6 +30,18 @@ type PictureBookClientProps = {
 };
 
 type SubTab = "editor" | "created";
+
+function triggerFileDownload(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+}
 
 export function PictureBookClient({
   projectKey,
@@ -56,6 +69,7 @@ export function PictureBookClient({
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [activeTab, setActiveTab] = useState<SubTab>("editor");
+  const [exportingFormat, setExportingFormat] = useState<"docx" | "pdf" | null>(null);
   const initialFetchProjectRef = useRef<string | null>(null);
   const interactionDisabled = isDraftLoading;
   const isPreparingDraft = isDraftLoading;
@@ -250,6 +264,71 @@ export function PictureBookClient({
     void requestDraft(nextCount, { previousCount });
   };
 
+  const handleExport = useCallback(
+    async (format: "docx" | "pdf") => {
+      if (!pages.length || exportingFormat) {
+        return;
+      }
+      resetFeedback();
+      setExportingFormat(format);
+      const label = format === "docx" ? "Word" : "PDF";
+      setStatusMessage(`${label}形式で絵本を出力しています…`);
+
+      try {
+        const response = await fetch(
+          `/api/projects/${encodeURIComponent(projectKey)}/picture-book/export`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json"
+            },
+            body: JSON.stringify({
+              format,
+              projectTitle,
+              pages: pages.map((page) => ({
+                pageNumber: page.pageNumber,
+                phase: page.phase,
+                narration: page.narration,
+                dialogues: page.dialogues,
+                imageUrl: page.imageUrl
+              }))
+            })
+          }
+        );
+
+        if (!response.ok) {
+          const errorText = await response.text();
+          let message = `${label}形式の出力に失敗しました。`;
+          try {
+            const parsed = JSON.parse(errorText);
+            if (parsed?.message) {
+              message = parsed.message;
+            }
+          } catch {
+            // ignore
+          }
+          throw new Error(message);
+        }
+
+        const blob = await response.blob();
+        const filename =
+          response.headers.get("x-export-filename") ??
+          buildExportFilename(projectTitle, projectKey, format);
+
+        triggerFileDownload(blob, filename);
+        setStatusMessage(`${label}ファイルをダウンロードしました。`);
+      } catch (error) {
+        console.error("絵本エクスポートに失敗しました:", error);
+        setStatusMessage(
+          error instanceof Error ? error.message : `${label}形式の出力に失敗しました。`
+        );
+      } finally {
+        setExportingFormat(null);
+      }
+    },
+    [pages, projectKey, projectTitle, exportingFormat, resetFeedback]
+  );
+
   const handleRegenerateDraft = () => {
     if (interactionDisabled) {
       return;
@@ -333,63 +412,76 @@ export function PictureBookClient({
     setActiveTab("editor");
     setIsBatchGenerating(true);
     setBatchProgress(0);
-    setStatusMessage("絵本生成を開始します…");
+    setStatusMessage("全ページの画像を並行生成しています…");
 
     const snapshot = [...pages];
 
     const run = async () => {
       let lastNote: string | null = null;
       let completed = 0;
-      const batchSize = 4;
-      for (let startIndex = 0; startIndex < snapshot.length; startIndex += batchSize) {
-        const batch = snapshot.slice(startIndex, startIndex + batchSize);
-        const batchLabelStart = startIndex + 1;
-        const batchLabelEnd = startIndex + batch.length;
-        setStatusMessage(
-          `ページ ${batchLabelStart}〜${batchLabelEnd}/${snapshot.length} の画像を生成しています…`
-        );
-        const results = await Promise.all(
-          batch.map(async (page) => ({
-            page,
-            response: await generatePictureBookImageAction({
+      let cancelled = false;
+      const total = snapshot.length;
+
+      const updateProgress = () => {
+        if (cancelled) {
+          return;
+        }
+        completed += 1;
+        setBatchProgress(completed);
+        setStatusMessage(`画像生成を進行中…（${completed}/${total}）`);
+      };
+
+      try {
+        await Promise.all(
+          snapshot.map(async (page) => {
+            const response = await generatePictureBookImageAction({
               projectKey,
               pageNumber: page.pageNumber,
               prompt: page.imagePrompt,
               phase: page.phase
-            })
-          }))
+            });
+            if (!response.ok) {
+              throw new Error(`ページ ${page.pageNumber}: ${response.message}`);
+            }
+
+            if (response.note) {
+              lastNote = response.note;
+            }
+
+            if (cancelled) {
+              return;
+            }
+
+            setPages((prev) =>
+              prev.map((item) =>
+                item.id === page.id
+                  ? {
+                      ...item,
+                      imageUrl: response.imageUrl
+                    }
+                  : item
+              )
+            );
+            updateProgress();
+          })
         );
 
-        for (const { page, response } of results) {
-          if (!response.ok) {
-            setImageError(response.message);
-            setStatusMessage(`ページ ${page.pageNumber} の画像生成に失敗しました。`);
-            setIsBatchGenerating(false);
-            setBatchProgress(completed);
-            return;
+        if (!cancelled) {
+          setStatusMessage("全ページの画像生成が完了しました。");
+          if (lastNote) {
+            setImageNote(lastNote);
           }
-          lastNote = response.note;
-          completed += 1;
-          setPages((prev) =>
-            prev.map((item) =>
-              item.id === page.id
-                ? {
-                    ...item,
-                    imageUrl: response.imageUrl
-                  }
-                : item
-            )
-          );
-          setBatchProgress(completed);
+          setActiveTab("created");
         }
+      } catch (error) {
+        cancelled = true;
+        const message =
+          error instanceof Error ? error.message : "画像生成中にエラーが発生しました。";
+        setImageError(message);
+        setStatusMessage(message);
+      } finally {
+        setIsBatchGenerating(false);
       }
-
-      setStatusMessage("全ページの画像生成が完了しました。");
-      if (lastNote) {
-        setImageNote(lastNote);
-      }
-      setIsBatchGenerating(false);
-      setActiveTab("created");
     };
 
     void run();
@@ -425,7 +517,7 @@ export function PictureBookClient({
             aria-pressed={activeTab === "created"}
             disabled={interactionDisabled}
           >
-            新規作成
+            生成した絵本
           </button>
         </div>
         {activeTab === "editor" ? (
@@ -666,14 +758,34 @@ export function PictureBookClient({
         </>
       ) : (
         <section className="space-y-6 rounded-lg border border-border bg-card/80 p-6 shadow-sm">
-          <header className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <header className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div className="space-y-1">
               <h3 className="text-lg font-semibold tracking-tight">生成した絵本</h3>
               <p className="text-sm text-muted-foreground">
                 生成された画像とナレーションを確認できます。必要に応じて「編集」に戻り細部を調整してください。
               </p>
             </div>
-            <span className="text-xs font-medium text-muted-foreground">全 {pages.length} ページ</span>
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-end">
+              <span className="text-xs font-medium text-muted-foreground">全 {pages.length} ページ</span>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExport("docx")}
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!pages.length || Boolean(exportingFormat)}
+                >
+                  {exportingFormat === "docx" ? "Word出力中…" : "Word出力"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleExport("pdf")}
+                  className="inline-flex items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-xs font-semibold uppercase tracking-wide text-foreground transition hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={!pages.length || Boolean(exportingFormat)}
+                >
+                  {exportingFormat === "pdf" ? "PDF出力中…" : "PDF出力"}
+                </button>
+              </div>
+            </div>
           </header>
           <div className="grid gap-6">
             {pages.map((page) => (
