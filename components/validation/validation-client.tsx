@@ -313,44 +313,45 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
   const isEditView = detailView === "edit";
 
   return (
-    <div className="space-y-6">
-      <section className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
-        <header className="space-y-2">
-          <h3 className="text-lg font-semibold tracking-tight">作業範囲の設定</h3>
-          <p className="text-sm text-muted-foreground">
-            プレビューしたいチャンクの範囲を指定してから、要約ブロックの整理を行います。
-          </p>
-        </header>
-        <div className="grid gap-4 md:grid-cols-[repeat(3,minmax(0,1fr))]">
-          <NumberField
-            id="validation-range-start"
-            label="開始チャンク"
-            value={rangeStart}
-            min={1}
-            max={entries[entries.length - 1]?.id ?? 1}
-            onChange={setRangeStart}
-          />
-          <NumberField
-            id="validation-range-end"
-            label="終了チャンク"
-            value={rangeEnd}
-            min={rangeStart}
-            max={entries[entries.length - 1]?.id ?? rangeStart}
-            onChange={setRangeEnd}
-          />
+    <div className="grid gap-6 xl:grid-cols-[minmax(300px,0.3fr)_minmax(0,0.7fr)] 2xl:grid-cols-[minmax(340px,0.28fr)_minmax(0,0.72fr)]">
+      <div className="space-y-6">
+        <section className="space-y-4 rounded-lg border border-border bg-card p-6 shadow-sm">
+          <header className="space-y-2">
+            <h3 className="text-lg font-semibold tracking-tight">作業範囲の設定</h3>
+            <p className="text-sm text-muted-foreground">
+              プレビューしたいチャンクの範囲を指定してから、要約ブロックの整理を行います。
+            </p>
+          </header>
+          <div className="grid gap-4 md:grid-cols-[repeat(2,minmax(0,1fr))]">
+            <NumberField
+              id="validation-range-start"
+              label="開始チャンク"
+              value={rangeStart}
+              min={1}
+              max={entries[entries.length - 1]?.id ?? 1}
+              onChange={setRangeStart}
+            />
+            <NumberField
+              id="validation-range-end"
+              label="終了チャンク"
+              value={rangeEnd}
+              min={rangeStart}
+              max={entries[entries.length - 1]?.id ?? rangeStart}
+              onChange={setRangeEnd}
+            />
+          </div>
           <button
             type="button"
             onClick={handleApplyRange}
             disabled={isApplyingRange}
             className={cn(
-              "self-end rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
+              "w-full rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition",
               "hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
               isApplyingRange && "cursor-not-allowed opacity-60"
             )}
           >
             {isApplyingRange ? "読込中…" : "範囲を適用"}
           </button>
-        </div>
         <div className="flex flex-wrap items-center gap-3 text-xs text-muted-foreground">
           <span>読み込み済みブロック: {blocks.length}</span>
           <span>総チャンク数: {entries.length}</span>
@@ -361,7 +362,9 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
           </div>
         )}
       </section>
+      </div>
 
+      <div className="space-y-6">
       <section className="space-y-6 rounded-lg border border-border bg-card p-6 shadow-sm">
         <header className="space-y-2">
           <h3 className="text-lg font-semibold tracking-tight">要約ブロックの整理</h3>
@@ -662,6 +665,7 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
           </p>
         )}
       </section>
+      </div>
 
     </div>
   );

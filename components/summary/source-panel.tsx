@@ -64,7 +64,10 @@ export function SourcePanel({ entries, highlightedIds = [], activeId = null }: S
           要約に紐づく本文です。ハイライト表示されている項目が引用候補です。
         </p>
       </header>
-      <ul ref={containerRef} className="flex max-h-80 flex-col gap-3 overflow-y-auto pr-1">
+      <ul
+        ref={containerRef}
+        className="flex max-h-80 flex-col gap-3 overflow-y-auto pr-1 lg:max-h-[70vh]"
+      >
         {entries.map((entry) => (
           <li
             key={entry.id}
