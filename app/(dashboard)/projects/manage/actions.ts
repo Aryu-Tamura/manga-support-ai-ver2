@@ -175,7 +175,6 @@ export async function createProjectFromUploadAction(
     revalidatePath("/projects");
     revalidatePath(`/projects/${key}/summary`);
     revalidatePath(`/projects/${key}/characters`);
-    revalidatePath(`/projects/${key}/plot`);
     revalidatePath(`/projects/${key}/validation`);
 
     recordAuditEvent({
@@ -257,7 +256,6 @@ export async function relabelProjectAction(
     revalidatePath("/projects");
     revalidatePath(`/projects/${key}/summary`);
     revalidatePath(`/projects/${key}/characters`);
-    revalidatePath(`/projects/${key}/plot`);
     revalidatePath(`/projects/${key}/validation`);
 
     recordAuditEvent({

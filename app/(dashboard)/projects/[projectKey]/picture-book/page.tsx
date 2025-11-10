@@ -19,21 +19,23 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
   const initialPages = buildInitialPictureBookPages(summarySentences, project.entries, DEFAULT_PICTURE_BOOK_PAGE_COUNT);
 
   return (
-    <section className="space-y-6">
-      <header className="space-y-2">
-        <h2 className="text-2xl font-bold tracking-tight">{project.title} / 絵本化</h2>
-        <p className="text-muted-foreground">
-          起承転結の流れを意識したページ割りを作成し、ナレーションやセリフ、画像案を編集できます。
-        </p>
-      </header>
-      <PictureBookClient
-        projectKey={project.key}
-        projectTitle={project.title}
-        entries={project.entries}
-        sentences={summarySentences}
-        initialPages={initialPages}
-        initialSource="fallback"
-      />
-    </section>
+    <div className="mx-auto w-full max-w-5xl">
+      <section className="space-y-6">
+        <header className="space-y-2">
+          <h2 className="text-2xl font-bold tracking-tight">{project.title} / 絵本化</h2>
+          <p className="text-muted-foreground">
+            起承転結の流れを意識したページ割りを作成し、ナレーションやセリフ、画像案を編集できます。
+          </p>
+        </header>
+        <PictureBookClient
+          projectKey={project.key}
+          projectTitle={project.title}
+          entries={project.entries}
+          sentences={summarySentences}
+          initialPages={initialPages}
+          initialSource="fallback"
+        />
+      </section>
+    </div>
   );
 }

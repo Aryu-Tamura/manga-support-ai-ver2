@@ -34,19 +34,11 @@ export default async function ProjectCharactersPage({ params }: CharactersPagePr
   }, {});
 
   return (
-    <section className="space-y-6">
-      <header className="space-y-2">
-        <h2 className="text-2xl font-bold tracking-tight">{project.title} / キャラ解析</h2>
-        <p className="text-muted-foreground">
-          登場人物ごとの本文抜粋を確認しながら、編集者向けの解析メモを生成します。
-        </p>
-      </header>
-      <CharacterClient
-        projectKey={project.key}
-        projectTitle={project.title}
-        characters={characterItems}
-        contexts={contextMap}
-      />
-    </section>
+    <CharacterClient
+      projectKey={project.key}
+      projectTitle={project.title}
+      characters={characterItems}
+      contexts={contextMap}
+    />
   );
 }
