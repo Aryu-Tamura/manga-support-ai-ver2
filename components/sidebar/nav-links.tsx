@@ -27,12 +27,6 @@ const NAV_ITEMS: NavItem[] = [
     baseHref: (key) => (key ? `/projects/${key}/summary` : "/projects")
   },
   {
-    id: "characters",
-    label: "キャラ解析",
-    icon: Users,
-    baseHref: (key) => (key ? `/projects/${key}/characters` : "/projects")
-  },
-  {
     id: "validation",
     label: "プロット支援",
     icon: ClipboardCheck,

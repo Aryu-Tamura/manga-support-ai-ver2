@@ -1,8 +1,13 @@
 import { notFound } from "next/navigation";
-import { SummaryClient } from "@/components/summary/summary-client";
 import { SUMMARY_GRAIN_OPTIONS } from "@/lib/config/summary";
 import { getProjectByKey } from "@/lib/projects/repository";
-import { SummaryPreview } from "@/components/summary/summary-preview";
+import { SummaryTabs } from "@/components/summary/summary-tabs";
+import { buildBasicInfo } from "@/lib/summary/basic-info";
+import {
+  collectCharacterEntries,
+  buildContextSnippets,
+  type CharacterContext
+} from "@/lib/characters/utils";
 
 type SummaryPageProps = {
   params: {
@@ -22,33 +27,32 @@ export default async function ProjectSummaryPage({ params }: SummaryPageProps) {
     summary: entry.summary
   }));
 
+  const basicInfo = buildBasicInfo(project);
+  const characterItems = project.characters
+    .filter((character) => character.Name && character.Name.trim().length > 0)
+    .map((character) => ({
+      name: character.Name.trim(),
+      role: character.Role ?? "",
+      details: character.Details ?? ""
+    }));
+  const contextMap = characterItems.reduce<Record<string, CharacterContext[]>>((acc, character) => {
+    const characterEntries = collectCharacterEntries(project.entries, character.name, 12);
+    acc[character.name] = buildContextSnippets(characterEntries);
+    return acc;
+  }, {});
+
   return (
     <section className="space-y-8">
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,0.4fr)_minmax(0,0.6fr)] 2xl:grid-cols-[minmax(0,480px)_1fr]">
-        <SummaryClient
-          projectKey={project.key}
-          projectTitle={project.title}
-          chunkCount={project.entries.length}
-          entries={entries}
-          grainOptions={SUMMARY_GRAIN_OPTIONS}
-          sourcePanelContainerId="summary-source-panel-root"
-        />
-        <div className="flex flex-col gap-6">
-          <SummaryPreview project={project} />
-          <section className="flex flex-col gap-4 rounded-lg border border-border bg-card p-6 shadow-sm">
-            <header className="space-y-1">
-              <h3 className="text-lg font-semibold tracking-tight">引用チャンク</h3>
-              <p className="text-sm text-muted-foreground">
-                要約で使われたチャンクにジャンプして根拠をすばやく確認できます。
-              </p>
-            </header>
-            <div
-              id="summary-source-panel-root"
-              className="min-h-[360px]"
-            />
-          </section>
-        </div>
-      </div>
+      <SummaryTabs
+        project={project}
+        projectKey={project.key}
+        entries={entries}
+        sentences={project.summarySentences ?? []}
+        grainOptions={SUMMARY_GRAIN_OPTIONS}
+        basicInfo={basicInfo}
+        characters={characterItems}
+        contexts={contextMap}
+      />
     </section>
   );
 }
