@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { SummaryClient } from "@/components/summary/summary-client";
 import { SummaryPreview } from "@/components/summary/summary-preview";
+import { CharacterClient } from "@/components/characters/character-client";
+import type { CharacterContext } from "@/lib/characters/utils";
 import type { SummarySentence, ProjectData } from "@/lib/projects/types";
 import type { BasicInfoData } from "@/lib/summary/basic-info";
 
@@ -19,13 +21,20 @@ type SummaryTabsProps = {
   sentences: SummarySentence[];
   grainOptions: number[];
   basicInfo: BasicInfoData;
+  characters: {
+    name: string;
+    role: string;
+    details: string;
+  }[];
+  contexts: Record<string, CharacterContext[]>;
 };
 
 type TabId = "insight" | "partial";
 
-const TABS: { id: TabId; label: string }[] = [
+const TABS: { id: TabId | "characters"; label: string }[] = [
   { id: "insight", label: "基本情報の理解" },
-  { id: "partial", label: "部分要約" }
+  { id: "partial", label: "部分要約" },
+  { id: "characters", label: "キャラクター解析" }
 ];
 
 export function SummaryTabs({
@@ -34,9 +43,11 @@ export function SummaryTabs({
   entries,
   sentences,
   grainOptions,
-  basicInfo
+  basicInfo,
+  characters,
+  contexts
 }: SummaryTabsProps) {
-  const [activeTab, setActiveTab] = useState<TabId>("insight");
+  const [activeTab, setActiveTab] = useState<TabId | "characters">("insight");
 
   return (
     <div className="space-y-6">
@@ -61,9 +72,8 @@ export function SummaryTabs({
         })}
       </div>
 
-      {activeTab === "insight" ? (
-        <BasicInfoPanel info={basicInfo} />
-      ) : (
+      {activeTab === "insight" && <BasicInfoPanel info={basicInfo} />}
+      {activeTab === "partial" && (
         <div className="grid gap-6 xl:grid-cols-[minmax(0,0.4fr)_minmax(0,0.6fr)] 2xl:grid-cols-[minmax(0,480px)_1fr]">
           <SummaryClient
             projectKey={projectKey}
@@ -86,6 +96,14 @@ export function SummaryTabs({
             </section>
           </div>
         </div>
+      )}
+      {activeTab === "characters" && (
+        <CharacterClient
+          projectKey={projectKey}
+          projectTitle={project.title}
+          characters={characters}
+          contexts={contexts}
+        />
       )}
     </div>
   );
