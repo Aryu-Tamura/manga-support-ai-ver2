@@ -77,5 +77,11 @@ body {
 }
 
 ::selection {
-  background-color: hsla(var(--primary), 0.2);
+  background-color: hsl(var(--primary) / 0.35);
+  color: hsl(var(--primary-foreground));
+}
+
+::-moz-selection {
+  background-color: hsl(var(--primary) / 0.35);
+  color: hsl(var(--primary-foreground));
 }
