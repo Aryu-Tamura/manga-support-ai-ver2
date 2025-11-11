@@ -13,6 +13,10 @@ import {
   SummarySentence,
   SummarySentenceSchema
 } from "./types";
+import {
+  PictureBookStateSchema,
+  type PictureBookState
+} from "@/lib/picture-book/schema";
 
 const DATA_ROOT = path.join(process.cwd(), "Streamlit", "data");
 const INDEX_FILE = path.join(DATA_ROOT, "projects_index.json");
@@ -282,6 +286,9 @@ export async function getProjectByKey(key: string): Promise<ProjectData | null> 
   const summarySentences = normalizeSummarySentences(panel.summary_sentences);
   const summaryUpdatedAt = typeof panel.summary_updated_at === "string" ? panel.summary_updated_at : "";
   const characters = await loadCharacterFile(definition.characterFile);
+  const pictureBook = normalizePictureBookState(
+    (panel as Record<string, unknown>).picture_book
+  );
 
   const project = ProjectDataSchema.parse({
     key: definition.key,
@@ -292,7 +299,8 @@ export async function getProjectByKey(key: string): Promise<ProjectData | null> 
     characters,
     fullText: panel.full_text ?? "",
     summaryUpdatedAt,
-    sourcePath: definition.panelFile
+    sourcePath: definition.panelFile,
+    pictureBook
   });
 
   return project;
@@ -334,4 +342,16 @@ function normalizeSummarySentences(value: unknown): SummarySentence[] {
     }
   }
   return result;
+}
+
+function normalizePictureBookState(value: unknown): PictureBookState | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = PictureBookStateSchema.safeParse(value);
+  if (!parsed.success) {
+    console.warn("絵本データの読み込みに失敗しました。", parsed.error);
+    return undefined;
+  }
+  return parsed.data;
 }

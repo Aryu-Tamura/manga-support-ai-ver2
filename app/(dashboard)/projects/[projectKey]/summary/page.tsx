@@ -47,7 +47,6 @@ export default async function ProjectSummaryPage({ params }: SummaryPageProps) {
         project={project}
         projectKey={project.key}
         entries={entries}
-        sentences={project.summarySentences ?? []}
         grainOptions={SUMMARY_GRAIN_OPTIONS}
         basicInfo={basicInfo}
         characters={characterItems}

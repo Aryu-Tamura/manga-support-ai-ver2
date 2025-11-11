@@ -1,10 +1,13 @@
 "use server";
 
 import { z } from "zod";
+import { revalidatePath } from "next/cache";
 import { generatePictureBookImage } from "@/lib/picture-book/image-service";
 import { generatePictureBookDraft } from "@/lib/picture-book/llm-generator";
 import { DEFAULT_PICTURE_BOOK_PAGE_COUNT, buildInitialPictureBookPages, type PictureBookPage } from "@/lib/picture-book/utils";
+import { PictureBookPageSchema } from "@/lib/picture-book/schema";
 import { getProjectByKey } from "@/lib/projects/repository";
+import { saveProjectPictureBookPages } from "@/lib/projects/persistence";
 
 const GenerateImagePayloadSchema = z.object({
   projectKey: z.string().min(1),
@@ -16,6 +19,11 @@ const GenerateImagePayloadSchema = z.object({
 const GenerateDraftPayloadSchema = z.object({
   projectKey: z.string().min(1),
   pageCount: z.number().int().min(1).optional()
+});
+
+const SavePictureBookPayloadSchema = z.object({
+  projectKey: z.string().min(1),
+  pages: z.array(PictureBookPageSchema)
 });
 
 export type GeneratePictureBookImageResponse =
@@ -40,6 +48,10 @@ export type GeneratePictureBookDraftResponse =
       ok: false;
       message: string;
     };
+
+export type SavePictureBookPagesResponse =
+  | { ok: true }
+  | { ok: false; message: string };
 
 export async function generatePictureBookImageAction(
   payload: z.infer<typeof GenerateImagePayloadSchema>
@@ -125,5 +137,28 @@ export async function generatePictureBookDraftAction(
       pages: buildInitialPictureBookPages(summarySentences, project.entries, pageCount),
       source: "fallback"
     };
+  }
+}
+
+export async function savePictureBookPagesAction(
+  payload: z.infer<typeof SavePictureBookPayloadSchema>
+): Promise<SavePictureBookPagesResponse> {
+  const parsed = SavePictureBookPayloadSchema.safeParse(payload);
+  if (!parsed.success) {
+    return {
+      ok: false,
+      message: "絵本データ保存リクエストの入力値が不正です。"
+    };
+  }
+  try {
+    await saveProjectPictureBookPages({
+      key: parsed.data.projectKey,
+      pages: parsed.data.pages
+    });
+    revalidatePath(`/projects/${parsed.data.projectKey}/picture-book`);
+    return { ok: true };
+  } catch (error) {
+    console.error("絵本データの保存に失敗しました:", error);
+    return { ok: false, message: "絵本を保存できませんでした。" };
   }
 }

@@ -5,7 +5,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, RefreshCw } from "lucide-react";
 import {
   generatePictureBookDraftAction,
-  generatePictureBookImageAction
+  generatePictureBookImageAction,
+  savePictureBookPagesAction
 } from "@/app/(dashboard)/projects/[projectKey]/picture-book/actions";
 import {
   DEFAULT_PICTURE_BOOK_PAGE_COUNT,
@@ -26,7 +27,7 @@ type PictureBookClientProps = {
   entries: EntryRecord[];
   sentences: SummarySentence[];
   initialPages?: PictureBookPage[] | null;
-  initialSource?: "llm" | "fallback";
+  initialSource?: "llm" | "fallback" | "saved";
 };
 
 type SubTab = "editor" | "created";
@@ -60,17 +61,17 @@ export function PictureBookClient({
   const pageCountRef = useRef<number>(initialPageList.length || defaultPageCount);
   const [pages, setPages] = useState<PictureBookPage[]>(initialPageList);
   const [selectedPageId, setSelectedPageId] = useState<string | null>(pages[0]?.id ?? null);
-  const [statusMessage, setStatusMessage] = useState<string | null>("AIが絵本の下書き準備中（1分ほどかかります）");
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [dialogueText, setDialogueText] = useState<string>("");
   const [narrationDraft, setNarrationDraft] = useState<string>("");
   const [imageNote, setImageNote] = useState<string | null>(null);
   const [imageError, setImageError] = useState<string | null>(null);
-  const [isDraftLoading, setIsDraftLoading] = useState(true);
+  const [isDraftLoading, setIsDraftLoading] = useState(false);
   const [isBatchGenerating, setIsBatchGenerating] = useState(false);
   const [batchProgress, setBatchProgress] = useState(0);
   const [activeTab, setActiveTab] = useState<SubTab>("editor");
   const [exportingFormat, setExportingFormat] = useState<"docx" | "pdf" | null>(null);
-  const initialFetchProjectRef = useRef<string | null>(null);
+  const skipNextPersistRef = useRef(true);
   const interactionDisabled = isDraftLoading;
   const isPreparingDraft = isDraftLoading;
 
@@ -80,11 +81,15 @@ export function PictureBookClient({
     if (initialPages && initialPages.length > 0) {
       pageCountRef.current = initialPages.length;
       setPageCount(initialPages.length);
+      skipNextPersistRef.current = true;
       setPages(initialPages);
       setSelectedPageId(initialPages[0]?.id ?? null);
       setStatusMessage((current) => {
         if (initialSource === "llm") {
           return "LLMで生成した絵本ドラフトを読み込みました。";
+        }
+        if (initialSource === "saved") {
+          return "保存済みの絵本ドラフトを読み込みました。";
         }
         return current ?? "プロジェクトデータを読み込み、絵本化レイアウトを初期化しました。";
       });
@@ -98,6 +103,7 @@ export function PictureBookClient({
   useEffect(() => {
     if (!initialPages || initialPages.length === 0) {
       const draft = buildInitialPictureBookPages(sentences, entries, pageCountRef.current);
+      skipNextPersistRef.current = true;
       setPages(draft);
       setSelectedPageId(draft[0]?.id ?? null);
       pageCountRef.current = draft.length;
@@ -142,6 +148,38 @@ export function PictureBookClient({
     const originalDialogues = selectedPage.dialogues.join("\n");
     return narrationDraft !== selectedPage.narration || dialogueText !== originalDialogues;
   }, [dialogueText, narrationDraft, selectedPage]);
+
+  const persistPages = useCallback(
+    async (nextPages: PictureBookPage[]) => {
+      if (!nextPages.length) {
+        return;
+      }
+      try {
+        await savePictureBookPagesAction({
+          projectKey,
+          pages: nextPages
+        });
+      } catch (error) {
+        console.error("絵本データの保存に失敗しました:", error);
+      }
+    },
+    [projectKey]
+  );
+
+  useEffect(() => {
+    skipNextPersistRef.current = true;
+  }, [projectKey]);
+
+  useEffect(() => {
+    if (skipNextPersistRef.current) {
+      skipNextPersistRef.current = false;
+      return;
+    }
+    if (!pages.length) {
+      return;
+    }
+    void persistPages(pages);
+  }, [pages, persistPages]);
 
   const confirmReset = useCallback(() => {
     if (!pages.length) {
@@ -228,24 +266,6 @@ export function PictureBookClient({
     },
     [projectKey, resetFeedback]
   );
-
-  useEffect(() => {
-    if (initialFetchProjectRef.current === projectKey) {
-      return;
-    }
-    initialFetchProjectRef.current = projectKey;
-    let cancelled = false;
-
-    void requestDraft(pageCountRef.current, {
-      onCancelled: () => cancelled,
-      suppressReset: true
-    });
-
-    return () => {
-      cancelled = true;
-      initialFetchProjectRef.current = null;
-    };
-  }, [projectKey, requestDraft]);
 
   const handlePageCountChange = (nextCount: number) => {
     if (interactionDisabled) {

@@ -2,6 +2,7 @@ import { promises as fs } from "node:fs";
 import path from "node:path";
 import { listProjectDefinitions, getProjectByKey } from "@/lib/projects/repository";
 import type { EntryRecord, ProjectDefinition, SummarySentence } from "@/lib/projects/types";
+import type { PictureBookPage, PictureBookState } from "@/lib/picture-book/schema";
 import { SAMPLE_PROJECT_KEYS } from "@/lib/projects/constants";
 
 const DATA_ROOT = path.join(process.cwd(), "Streamlit", "data");
@@ -102,7 +103,8 @@ export async function updateProjectMetadata(input: {
     summary_sentences: serializeSummarySentences(project.summarySentences ?? []),
     summary_updated_at: project.summaryUpdatedAt || new Date().toISOString(),
     entries: serializeEntries(project),
-    full_text: project.fullText
+    full_text: project.fullText,
+    ...(project.pictureBook ? { picture_book: project.pictureBook } : {})
   };
 
   await fs.mkdir(path.dirname(definition.panelFile), { recursive: true });
@@ -150,7 +152,8 @@ export async function saveProjectSummaryResult(input: {
     summary_sentences: serializeSummarySentences(sentences),
     summary_updated_at: updatedAt,
     entries: serializeEntryRecords(updatedEntries),
-    full_text: project.fullText
+    full_text: project.fullText,
+    ...(project.pictureBook ? { picture_book: project.pictureBook } : {})
   };
 
   await fs.mkdir(path.dirname(project.sourcePath), { recursive: true });
@@ -229,7 +232,8 @@ export async function registerNewProject(input: {
     summary_sentences: [],
     summary_updated_at: new Date().toISOString(),
     entries,
-    full_text: fullText
+    full_text: fullText,
+    picture_book: { pages: [] }
   };
 
   await fs.mkdir(path.dirname(panelPath), { recursive: true });
@@ -257,6 +261,7 @@ export async function overwriteProjectData(input: {
   characters: unknown[];
   summarySentences?: SummarySentence[];
   summaryUpdatedAt?: string;
+  pictureBook?: PictureBookState;
 }): Promise<void> {
   const {
     key,
@@ -266,7 +271,8 @@ export async function overwriteProjectData(input: {
     fullText,
     characters,
     summarySentences = [],
-    summaryUpdatedAt
+    summaryUpdatedAt,
+    pictureBook
   } = input;
 
   if (SAMPLE_PROJECT_KEYS.has(key)) {
@@ -284,7 +290,8 @@ export async function overwriteProjectData(input: {
     summary_sentences: serializeSummarySentences(summarySentences),
     summary_updated_at: summaryUpdatedAt ?? new Date().toISOString(),
     entries: Array.isArray(entries) ? serializeEntryRecords(entries as EntryRecord[]) : [],
-    full_text: fullText
+    full_text: fullText,
+    ...(pictureBook ? { picture_book: pictureBook } : {})
   };
 
   await fs.mkdir(path.dirname(definition.panelFile), { recursive: true });
@@ -312,6 +319,40 @@ export async function overwriteProjectData(input: {
   }
 
   await writeIndexFile(indexEntries);
+}
+
+export async function saveProjectPictureBookPages(input: {
+  key: string;
+  pages: PictureBookPage[];
+}): Promise<void> {
+  const { key, pages } = input;
+  const project = await getProjectByKey(key);
+  if (!project || !project.sourcePath) {
+    throw new Error("プロジェクトが見つからないため絵本を保存できません。");
+  }
+  const normalisedPages = pages.map((page, index) => ({
+    ...page,
+    pageNumber: index + 1
+  }));
+
+  let existingPayload: Record<string, unknown>;
+  try {
+    const raw = await fs.readFile(project.sourcePath, "utf-8");
+    existingPayload = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    existingPayload = {
+      summary: project.summary,
+      summary_sentences: serializeSummarySentences(project.summarySentences ?? []),
+      summary_updated_at: project.summaryUpdatedAt || new Date().toISOString(),
+      entries: serializeEntries(project),
+      full_text: project.fullText
+    };
+  }
+
+  existingPayload.picture_book = { pages: normalisedPages };
+
+  await fs.mkdir(path.dirname(project.sourcePath), { recursive: true });
+  await fs.writeFile(project.sourcePath, JSON.stringify(existingPayload, null, 2), "utf-8");
 }
 
 const ENTRY_SUMMARY_LIMIT = 280;

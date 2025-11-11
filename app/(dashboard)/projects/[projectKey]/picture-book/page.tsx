@@ -16,7 +16,12 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
   }
 
   const summarySentences = project.summarySentences ?? [];
-  const initialPages = buildInitialPictureBookPages(summarySentences, project.entries, DEFAULT_PICTURE_BOOK_PAGE_COUNT);
+  const savedPages = project.pictureBook?.pages ?? null;
+  const initialPages =
+    savedPages && savedPages.length > 0
+      ? savedPages
+      : buildInitialPictureBookPages(summarySentences, project.entries, DEFAULT_PICTURE_BOOK_PAGE_COUNT);
+  const initialSource = savedPages && savedPages.length > 0 ? "saved" : "fallback";
 
   return (
     <section className="w-full bg-muted/5">
@@ -27,7 +32,7 @@ export default async function ProjectPictureBookPage({ params }: PictureBookPage
           entries={project.entries}
           sentences={summarySentences}
           initialPages={initialPages}
-          initialSource="fallback"
+          initialSource={initialSource}
         />
       </div>
     </section>
