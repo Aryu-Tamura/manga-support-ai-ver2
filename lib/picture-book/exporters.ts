@@ -98,8 +98,7 @@ async function createDocxExport(options: PictureBookExportOptions): Promise<Pict
         sectionChildren.push(
           new Paragraph({
             alignment: AlignmentType.LEFT,
-            italics: true,
-            children: [new TextRun("画像を取得できませんでした。")]
+            children: [new TextRun({ text: "画像を取得できませんでした。", italics: true })]
           })
         );
       }
@@ -107,8 +106,7 @@ async function createDocxExport(options: PictureBookExportOptions): Promise<Pict
       sectionChildren.push(
         new Paragraph({
           alignment: AlignmentType.LEFT,
-          italics: true,
-          children: [new TextRun("画像未生成")]
+          children: [new TextRun({ text: "画像未生成", italics: true })]
         })
       );
     }
