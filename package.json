@@ -11,18 +11,21 @@
     "test": "vitest"
   },
   "dependencies": {
+    "@fontsource/noto-sans-jp": "^5.2.8",
+    "@pdf-lib/fontkit": "^1.1.1",
     "class-variance-authority": "^0.7.0",
     "clsx": "^2.1.1",
-    "lucide-react": "^0.454.0",
-    "openai": "^4.66.1",
     "docx": "^8.5.0",
-    "tailwindcss-animate": "^1.0.7",
+    "lucide-react": "^0.454.0",
     "next": "14.2.9",
+    "openai": "^4.66.1",
+    "pdf-lib": "^1.17.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwind-merge": "^2.2.1",
-    "zustand": "^4.5.2",
-    "zod": "^3.23.8"
+    "tailwindcss-animate": "^1.0.7",
+    "zod": "^3.23.8",
+    "zustand": "^4.5.2"
   },
   "devDependencies": {
     "@types/node": "^20.12.7",
