@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { PictureBookStateSchema } from "@/lib/picture-book/schema";
 
 export const SourceSpanSchema = z.object({
   start: z.number().int(),
@@ -65,7 +66,8 @@ export const ProjectDataSchema = z.object({
   entries: z.array(EntryRecordSchema),
   characters: z.array(CharacterRecordSchema),
   fullText: z.string().optional().default(""),
-  sourcePath: z.string().optional()
+  sourcePath: z.string().optional(),
+  pictureBook: PictureBookStateSchema.optional()
 });
 
 export type ProjectData = z.infer<typeof ProjectDataSchema>;

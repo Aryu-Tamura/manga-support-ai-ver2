@@ -2,13 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import {
-  BookOpen,
-  ClipboardCheck,
-  Image as ImageIcon,
-  Settings2,
-  Users
-} from "lucide-react";
+import { BookOpen, ClipboardCheck, Image as ImageIcon, Settings2 } from "lucide-react";
 import { useProjectStore } from "@/lib/store/project-store";
 import { cn } from "@/lib/utils";
 
@@ -25,12 +19,6 @@ const NAV_ITEMS: NavItem[] = [
     label: "原作理解",
     icon: BookOpen,
     baseHref: (key) => (key ? `/projects/${key}/summary` : "/projects")
-  },
-  {
-    id: "characters",
-    label: "キャラ解析",
-    icon: Users,
-    baseHref: (key) => (key ? `/projects/${key}/characters` : "/projects")
   },
   {
     id: "validation",

@@ -1,22 +1,14 @@
 import type { EntryRecord, SummarySentence } from "@/lib/projects/types";
+import {
+  PICTURE_BOOK_PHASES,
+  type PictureBookPage,
+  type PictureBookPhase
+} from "./schema";
 
 export const PICTURE_BOOK_PAGE_OPTIONS = [8, 12, 16] as const;
 export const DEFAULT_PICTURE_BOOK_PAGE_COUNT = PICTURE_BOOK_PAGE_OPTIONS[0];
-
-export const PICTURE_BOOK_PHASES = ["起", "承", "転", "結"] as const;
-
-export type PictureBookPhase = (typeof PICTURE_BOOK_PHASES)[number];
-
-export type PictureBookPage = {
-  id: string;
-  pageNumber: number;
-  phase: PictureBookPhase;
-  imagePrompt: string;
-  imageUrl: string | null;
-  narration: string;
-  dialogues: string[];
-  citations: number[];
-};
+export { PICTURE_BOOK_PHASES };
+export type { PictureBookPhase, PictureBookPage };
 
 const MAX_NARRATION_LENGTH = 200;
 const MAX_DIALOGUE_LENGTH = 100;

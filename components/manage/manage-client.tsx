@@ -9,6 +9,7 @@ import {
   relabelProjectAction
 } from "@/app/(dashboard)/projects/manage/actions";
 import { cn } from "@/lib/utils";
+import { ChevronDown } from "lucide-react";
 
 type ManageProject = {
   key: string;
@@ -55,7 +56,7 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
   const [deleteConfirmation, setDeleteConfirmation] = useState<string | null>(null);
   const [isUpdating, startUpdateTransition] = useTransition();
   const [isDeleting, startDeleteTransition] = useTransition();
-  const [expandedKey, setExpandedKey] = useState<string | null>(projects[0]?.key ?? null);
+  const [expandedKey, setExpandedKey] = useState<string | null>(null);
 
   const [uploadMessage, setUploadMessage] = useState<MessageState>(null);
   const uploadStepLabels = [
@@ -77,8 +78,8 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
 
   const formMap = useMemo(() => new Map(forms.map((form) => [form.key, form])), [forms]);
   useEffect(() => {
-    if (!expandedKey || !projects.some((project) => project.key === expandedKey)) {
-      setExpandedKey(projects[0]?.key ?? null);
+    if (expandedKey && !projects.some((project) => project.key === expandedKey)) {
+      setExpandedKey(null);
     }
   }, [projects, expandedKey]);
 
@@ -244,10 +245,6 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
           </p>
         </header>
         <div className="mt-4 space-y-4">
-          <div className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
-            解析はサーバー側で順次実行されます。OpenAI API キーが設定されていない場合はサンプル要約で登録されます。
-          </div>
-
           <div className="space-y-3">
             <label className="flex flex-col gap-1">
               <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -365,30 +362,31 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
                   disabled && "opacity-90"
                 )}
               >
-                <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    aria-expanded={isExpanded}
+                    aria-controls={`project-panel-${project.key}`}
                     onClick={() => setExpandedKey(isExpanded ? null : project.key)}
                     className="flex w-full items-center justify-between text-left"
                   >
-                    <div className="flex flex-col">
-                      <h4 className="text-base font-semibold text-foreground">{project.title}</h4>
-                      <p className="text-xs uppercase tracking-wide text-muted-foreground">
-                        チャンク {project.chunkCount} / キャラクター {project.characterCount}
-                      </p>
-                    </div>
-                    <span className="text-sm text-muted-foreground">
-                      {isExpanded ? "▲" : "▼"}
-                    </span>
+                    <h4 className="text-base font-semibold text-foreground">{project.title}</h4>
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 text-muted-foreground transition-transform",
+                        isExpanded && "rotate-180"
+                      )}
+                    />
                   </button>
-                  {project.isSample && (
-                    <span className="rounded-full border border-muted-foreground/40 px-3 py-1 text-xs font-medium text-muted-foreground">
-                      サンプル（編集不可）
-                    </span>
-                  )}
                 </div>
                 {isExpanded && (
-                  <div className="mt-4 space-y-4">
+                  <div
+                    id={`project-panel-${project.key}`}
+                    className="mt-4 space-y-4 border-t border-border/60 pt-4"
+                  >
+                    <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                      チャンク {project.chunkCount} / キャラクター {project.characterCount}
+                    </p>
                     <label className="flex flex-col gap-2">
                       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                         プロジェクト名
