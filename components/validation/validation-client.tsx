@@ -53,7 +53,7 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
   const [rangeStart, setRangeStart] = useState(initialRange.start);
   const [rangeEnd, setRangeEnd] = useState(initialRange.end);
   const [blocks, setBlocks] = useState<ValidationBlock[]>(() =>
-    buildInitialBlocks(sentences, entries, initialRange.start, initialRange.end)
+    buildInitialBlocks(projectKey, sentences, entries, initialRange.start, initialRange.end)
   );
   const [selectedBlockId, setSelectedBlockId] = useState<string | null>(blocks[0]?.blockId ?? null);
   const [variationsState, setVariationsState] = useState<VariationsState>(null);
@@ -111,7 +111,7 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
       const lastEntryId = entries[entries.length - 1]?.id ?? 1;
       const start = Math.max(1, Math.min(rangeStart, lastEntryId));
       const end = Math.max(start, Math.min(rangeEnd, lastEntryId));
-      const nextBlocks = buildInitialBlocks(sentences, entries, start, end);
+      const nextBlocks = buildInitialBlocks(projectKey, sentences, entries, start, end);
       if (nextBlocks.length === 0) {
         setRangeMessage("指定範囲に要約ブロックがありません。");
         return;
@@ -424,11 +424,14 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
                         )}
                         >
                           <div className="flex items-start justify-between gap-3">
-                            <div className="space-y-1">
+                            <div className="space-y-2">
+                              <div className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
+                                {block.title || "タイトル未設定"}
+                              </div>
                               <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                                 <span>順序 {block.order}</span>
                                 <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40" />
-                                <span>元チャンク番号 {block.entryId}</span>
+                                <span>元番号 {block.entryId}</span>
                               </div>
                               <p className="text-sm leading-relaxed text-foreground whitespace-pre-wrap">
                                 {block.summary || "（要約が入力されていません）"}
@@ -516,9 +519,15 @@ export function ValidationClient({ projectKey, entries, sentences }: ValidationC
                   </header>
                   {selectedBlock ? (
                     <>
-                      <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-                        <span>順序 {selectedBlock.order}</span>
-                        <span>元チャンク番号 {selectedBlock.entryId}</span>
+                      <div className="space-y-2">
+                        <div className="rounded-md bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
+                          {selectedBlock.title || "タイトル未設定"}
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <span>順序 {selectedBlock.order}</span>
+                          <span className="inline-block h-1 w-1 rounded-full bg-muted-foreground/40" />
+                          <span>元番号 {selectedBlock.entryId}</span>
+                        </div>
                       </div>
                       <textarea
                         value={selectedBlock.summary}
