@@ -67,8 +67,6 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
   const [uploadTitle, setUploadTitle] = useState("");
   const [uploadFileName, setUploadFileName] = useState<string | null>(null);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploadStyleHint, setUploadStyleHint] = useState("");
-  const [uploadChunkSize, setUploadChunkSize] = useState(250);
   const [isUploading, startUploadTransition] = useTransition();
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const router = useRouter();
@@ -207,9 +205,9 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
       try {
         const formData = new FormData();
         formData.append("title", uploadTitle.trim());
-        formData.append("styleHint", uploadStyleHint);
+        formData.append("styleHint", "");
         formData.append("file", uploadFile, uploadFile.name);
-        formData.append("chunkTarget", String(uploadChunkSize));
+        formData.append("chunkTarget", "250");
         setUploadSteps(2);
         const response = await createProjectFromUploadAction(formData);
         setUploadSteps(3);
@@ -219,10 +217,8 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
         });
         if (response.ok) {
           setUploadTitle("");
-          setUploadStyleHint("");
           setUploadFile(null);
           setUploadFileName(null);
-          setUploadChunkSize(250);
           if (fileInputRef.current) {
             fileInputRef.current.value = "";
           }
@@ -288,33 +284,6 @@ export function ManageClient({ projects, auditEvents }: ManageClientProps) {
             <div className="text-xs text-muted-foreground">
               {uploadFileName ? `選択済みファイル: ${uploadFileName}` : "ファイルが未選択です。"}
             </div>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                作風ヒント（任意）
-              </span>
-              <textarea
-                value={uploadStyleHint}
-                onChange={(event) => setUploadStyleHint(event.target.value)}
-                rows={3}
-                placeholder="LLM に伝えたい補足（例：テンポ感、ターゲット層など）"
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm leading-relaxed text-foreground outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              />
-            </label>
-
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                チャンク目標文字数（80〜600）
-              </span>
-              <input
-                type="number"
-                min={80}
-                max={600}
-                value={uploadChunkSize}
-                onChange={(event) => setUploadChunkSize(Number(event.target.value) || 250)}
-                className="rounded-md border border-border bg-background px-3 py-2 text-sm outline-none transition focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-              />
-            </label>
 
             <button
               type="button"
